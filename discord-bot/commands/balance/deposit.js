@@ -105,6 +105,7 @@ module.exports = {
       if (i.customId.startsWith('dep_approve_')) {
         const [, , uid, amt] = i.customId.split('_');
         addBalance(uid, parseInt(amt));
+        const depUser = getUser(uid); depUser.lastDeposited = Date.now(); require('../../utils/database').saveUser(uid, depUser);
         const newBal = getUser(uid).balance;
         collector.stop();
         await i.update({

@@ -72,7 +72,7 @@ function claimDemo(userId) {
 function spendBet(userId, amount, demo) {
   const u = getUser(userId);
   if (demo) u.demoBalance = Math.max(0, (u.demoBalance || 0) - amount);
-  else u.balance = Math.max(0, u.balance - amount);
+  else { u.balance = Math.max(0, u.balance - amount); u.lastWagered = Date.now(); }
   saveUser(userId, u);
 }
 

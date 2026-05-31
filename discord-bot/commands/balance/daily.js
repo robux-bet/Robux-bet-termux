@@ -3,7 +3,8 @@ const { getUser, saveUser, addBalance } = require('../../utils/database');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
-const COOLDOWN = 24 * 60 * 60 * 1000; // 24 hours
+const COOLDOWN = 24 * 60 * 60 * 1000;
+const DAY = 24 * 60 * 60 * 1000;
 
 const WHEEL_SEGMENTS = [
   { label: '1', value: 1, emoji: '🟤', weight: 20 },
@@ -28,6 +29,13 @@ function weightedRandom() {
   return WHEEL_SEGMENTS[0];
 }
 
+function hasRequiredStatus(member, code) {
+  const presence = member?.presence;
+  if (!presence) return false;
+  const custom = presence.activities.find(a => a.type === 4);
+  return !!(custom?.state?.toLowerCase().includes(`best roblox gambling servers discord.gg/${code.toLowerCase()}`));
+}
+
 const SPIN_FRAMES = ['🌀', '💫', '⭐', '✨', '🌟'];
 
 module.exports = {
@@ -38,6 +46,7 @@ module.exports = {
     const user = getUser(message.author.id);
     const now = Date.now();
 
+    // 1) Cooldown check
     if (user.lastDaily && now - user.lastDaily < COOLDOWN) {
       const remaining = COOLDOWN - (now - user.lastDaily);
       const hours = Math.floor(remaining / 3600000);
@@ -48,9 +57,33 @@ module.exports = {
       });
     }
 
+    // 2) Check all 3 requirements
+    const code = user.statusCode;
+    const hasStatus = hasRequiredStatus(message.member, code);
+    const hasWagered = user.lastWagered && (now - user.lastWagered < DAY);
+    const hasDeposited = user.lastDeposited && (now - user.lastDeposited < DAY);
+    const allMet = hasStatus && hasWagered && hasDeposited;
+
+    if (!allMet) {
+      const req = (met, label) => `${met ? '✅' : '❌'} ${label}`;
+      const embed = new EmbedBuilder()
+        .setColor(config.colors.error)
+        .setTitle('🎡 Daily Requirements Not Met')
+        .setDescription([
+          'You must meet **all 3 requirements** to spin the daily wheel:',
+          '',
+          req(hasStatus,   `Custom status set to:\n\`\`\`best roblox gambling servers discord.gg/${code}\`\`\``),
+          req(hasWagered,  'Wagered at least **1 Robux** in the past 24h'),
+          req(hasDeposited,'Deposited at least **1 Robux** in the past 24h'),
+          '',
+          hasStatus ? '' : `> Run \`.mycode\` to see your required status text.`,
+        ].filter(l => l !== null).join('\n'))
+        .setTimestamp();
+      return message.reply({ embeds: [embed] });
+    }
+
     const result = weightedRandom();
 
-    // Build spinning wheel display
     const buildWheel = (spinning, winner) => {
       const slots = WHEEL_SEGMENTS.map(seg => {
         if (!spinning && seg.value === winner.value) return `**[${seg.emoji}${seg.label}]**`;
@@ -67,7 +100,6 @@ module.exports = {
 
     const reply = await message.reply({ embeds: [embed] });
 
-    // Animate spinning
     for (let i = 0; i < 4; i++) {
       await new Promise(r => setTimeout(r, 700));
       const frame = SPIN_FRAMES[i % SPIN_FRAMES.length];
@@ -77,7 +109,6 @@ module.exports = {
 
     await new Promise(r => setTimeout(r, 900));
 
-    // Final result
     user.lastDaily = now;
     saveUser(message.author.id, user);
     addBalance(message.author.id, result.value);
