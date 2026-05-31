@@ -2,6 +2,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentTyp
 const { spendBet, addWin, getUser, recordGame, getActivePool } = require('../../utils/database');
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
+const { beginGame, saveGameRecord, deriveWeightedItem, gameIdFooter } = require('../../utils/fairness');
 const config = require('../../config');
 
 const ITEMS = [
@@ -15,13 +16,6 @@ const ITEMS = [
 ];
 
 const RARITY_COLOR = { Common:'⬜', Uncommon:'🟩', Rare:'🟦', Epic:'🟪', Legendary:'🟨', Mythic:'🌈' };
-
-function openCase() {
-  const total = ITEMS.reduce((s, i) => s + i.weight, 0);
-  let r = Math.random() * total;
-  for (const item of ITEMS) { r -= item.weight; if (r <= 0) return item; }
-  return ITEMS[0];
-}
 
 module.exports = {
   name: 'casebattles',
@@ -82,39 +76,43 @@ module.exports = {
 };
 
 async function runBattle(msg, bet, p1User, p2User, p1IsDemo, p2IsDemo) {
-  const { addWin, getUser, recordGame } = require('../../utils/database');
-  const { calcPayout, balLabel } = require('../../utils/gameUtils');
-  const config = require('../../config');
-
-  const SPIN_FAKE = Array.from({ length: 6 }, openCase);
-  const SPIN_FAKE2 = Array.from({ length: 6 }, openCase);
+  const game = beginGame(p1User.id, 2);
 
   for (let f = 0; f < 4; f++) {
     await new Promise(r => setTimeout(r, 600));
+    const fakeItems = Array.from({ length: 3 }, () => ITEMS[Math.floor(Math.random() * ITEMS.length)]);
+    const fakeItems2 = Array.from({ length: 3 }, () => ITEMS[Math.floor(Math.random() * ITEMS.length)]);
     const embed = new EmbedBuilder().setColor(config.colors.primary).setTitle('📦 Opening Cases...')
       .setDescription([
-        `**${p1User.username}:** ${SPIN_FAKE.slice(f, f + 3).map(i => i.emoji).join(' ')}`,
-        `**${p2User.username}:** ${SPIN_FAKE2.slice(f, f + 3).map(i => i.emoji).join(' ')}`,
+        `**${p1User.username}:** ${fakeItems.map(i => i.emoji).join(' ')}`,
+        `**${p2User.username}:** ${fakeItems2.map(i => i.emoji).join(' ')}`,
         `🌀 Spinning...`,
       ].join('\n')).setTimestamp();
     await msg.edit({ embeds: [embed], components: [] }).catch(() => {});
   }
 
   await new Promise(r => setTimeout(r, 800));
-  const p1Item = openCase(), p2Item = openCase();
+  const p1Item = deriveWeightedItem(game.floats[0], ITEMS);
+  const p2Item = deriveWeightedItem(game.floats[1], ITEMS);
   const p1Won = p1Item.mult >= p2Item.mult;
   const pot = bet * 2;
   const winner = p1Won ? p1User : p2User;
   const winnerIsDemo = p1Won ? p1IsDemo : p2IsDemo;
-  const loserIsDemo = p1Won ? p2IsDemo : p1IsDemo;
 
-  const payout = calcPayout(pot, 1, false); // pot * 0.95 house edge
+  const payout = calcPayout(pot, 1, false);
   addWin(winner.id, payout, winnerIsDemo);
   recordGame(p1User.id, p1Won, p1Won ? payout - bet : bet);
   recordGame(p2User.id, !p1Won, !p1Won ? payout - bet : bet);
 
+  saveGameRecord({
+    gameId: game.gameId, type: 'casebattles', userId: p1User.id,
+    serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+    clientSeed: game.clientSeed, nonce: game.nonce,
+    inputs: { p1: p1User.username, p2: p2User.username },
+    outcome: { p1Item: p1Item.name, p2Item: p2Item.name, winner: winner.username, result: p1Won ? 'win' : 'lose' },
+  });
+
   const newBal = p1IsDemo ? getUser(p1User.id).demoBalance : getUser(p1User.id).balance;
-  const RARITY_COLOR = { Common:'⬜', Uncommon:'🟩', Rare:'🟦', Epic:'🟪', Legendary:'🟨', Mythic:'🌈' };
 
   const embed = new EmbedBuilder()
     .setColor(p1Won ? config.colors.success : config.colors.error)
@@ -129,6 +127,7 @@ async function runBattle(msg, bet, p1User, p2User, p1IsDemo, p2IsDemo) {
         : `💔 **${p2User.username} wins!** ${p1User.username} lost **${bet.toLocaleString()}** ${config.currency}.`,
       `💰 ${p1User.username}'s balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(p1IsDemo)}`,
     ].join('\n'))
+    .setFooter({ text: gameIdFooter(game.gameId) })
     .setTimestamp();
 
   msg.edit({ embeds: [embed], components: [] }).catch(() => {});

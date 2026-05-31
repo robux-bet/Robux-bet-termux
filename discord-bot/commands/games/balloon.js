@@ -2,6 +2,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentTyp
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
+const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const config = require('../../config');
 
 module.exports = {
@@ -16,21 +17,12 @@ module.exports = {
     const gameKey = `balloon_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current balloon game!')] });
 
+    const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Balloon', userId: message.author.id, bet });
 
-    // Rig pop point:
-    // Demo: always pops late (12-22 pumps)
-    // Actual high bet (50+): pops early (2-6 pumps)
-    // Actual low bet: moderate (5-14 pumps)
-    let popAt;
-    if (isDemo) {
-      popAt = Math.floor(Math.random() * 11) + 12; // 12-22
-    } else if (bet >= 50) {
-      popAt = Math.floor(Math.random() * 5) + 2;   // 2-6 (early pop)
-    } else {
-      popAt = Math.floor(Math.random() * 10) + 5;  // 5-14
-    }
+    // Derive pop point from seed: 3-25 pumps (uniform)
+    const popAt = Math.floor(game.floats[0] * 23) + 3;
 
     let pumps = 0;
     let gameOver = false;
@@ -75,8 +67,17 @@ module.exports = {
         recordGame(message.author.id, true, winnings - bet);
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         gameOver = true; client.activeGames.delete(gameKey); collector.stop();
+
+        saveGameRecord({
+          gameId: game.gameId, type: 'balloon', userId: message.author.id,
+          serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+          clientSeed: game.clientSeed, nonce: game.nonce,
+          inputs: { pumps },
+          outcome: { popAt, result: 'win' },
+        });
+
         await i.update({
-          embeds: [buildEmbed(`💰 Cashed at **${mult}x**! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)],
+          embeds: [buildEmbed(`💰 Cashed at **${mult}x**! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
           components: [],
         }).catch(() => {});
         return;
@@ -87,12 +88,21 @@ module.exports = {
         gameOver = true; recordGame(message.author.id, false, bet);
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         client.activeGames.delete(gameKey); collector.stop();
+
+        saveGameRecord({
+          gameId: game.gameId, type: 'balloon', userId: message.author.id,
+          serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+          clientSeed: game.clientSeed, nonce: game.nonce,
+          inputs: { pumps },
+          outcome: { popAt, result: 'lose' },
+        });
+
         await i.update({
           embeds: [new EmbedBuilder().setColor(config.colors.error).setTitle('💥 POP!').setDescription([
             `The balloon popped after **${pumps}** pumps!`,
             `Lost **${bet.toLocaleString()}** ${config.currency}.`,
             `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
-          ].join('\n')).setTimestamp()],
+          ].join('\n')).setFooter({ text: gameIdFooter(game.gameId) }).setTimestamp()],
           components: [],
         }).catch(() => {});
       } else {

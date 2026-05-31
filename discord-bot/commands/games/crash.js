@@ -2,13 +2,8 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentTyp
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
+const { beginGame, saveGameRecord, deriveCrashPoint, gameIdFooter } = require('../../utils/fairness');
 const config = require('../../config');
-
-function generateCrashPoint() {
-  const r = Math.random();
-  if (r < 0.04) return 1.0;
-  return Math.max(1.01, parseFloat((0.96 / (1 - r)).toFixed(2)));
-}
 
 function buildBar(current, max) {
   const pct = Math.min(current / Math.max(max, 5), 1);
@@ -28,12 +23,14 @@ module.exports = {
     const gameKey = `crash_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current crash game!')] });
 
+    const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Crash', userId: message.author.id, bet });
 
-    const crashPoint = generateCrashPoint();
+    const crashPoint = deriveCrashPoint(game.floats[0]);
     let current = 1.00;
     let cashedOut = false;
+    let cashedOutAt = null;
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('crash_cashout').setLabel('💰 Cash Out').setStyle(ButtonStyle.Success)
@@ -62,6 +59,7 @@ module.exports = {
     collector.on('collect', async i => {
       if (!cashedOut) {
         cashedOut = true;
+        cashedOutAt = current;
         collector.stop('cashout');
         await i.deferUpdate();
       }
@@ -76,9 +74,19 @@ module.exports = {
         client.activeGames.delete(gameKey);
         collector.stop('crashed');
         recordGame(message.author.id, false, bet);
+
+        saveGameRecord({
+          gameId: game.gameId, type: 'crash', userId: message.author.id,
+          serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+          clientSeed: game.clientSeed, nonce: game.nonce,
+          inputs: { cashedOutAt: null },
+          outcome: { crashPoint, result: 'lose' },
+        });
+
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         const embed = buildEmbed(true);
-        embed.setDescription(embed.data.description + `\n😢 Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`);
+        embed.setDescription(embed.data.description + `\n😢 Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)
+          .setFooter({ text: gameIdFooter(game.gameId) });
         reply.edit({ embeds: [embed], components: [] }).catch(() => {});
         return;
       }
@@ -89,19 +97,28 @@ module.exports = {
       clearInterval(interval);
       client.activeGames.delete(gameKey);
       if (reason === 'cashout') {
-        // Apply multiplier floor + house edge
-        const winnings = calcPayout(bet, current, true);
+        const winnings = calcPayout(bet, cashedOutAt, true);
         addWin(message.author.id, winnings, isDemo);
         recordGame(message.author.id, winnings > bet, winnings > bet ? winnings - bet : bet - winnings);
+
+        saveGameRecord({
+          gameId: game.gameId, type: 'crash', userId: message.author.id,
+          serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+          clientSeed: game.clientSeed, nonce: game.nonce,
+          inputs: { cashedOutAt },
+          outcome: { crashPoint, result: winnings >= bet ? 'win' : 'lose' },
+        });
+
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         const embed = new EmbedBuilder()
           .setColor(winnings >= bet ? config.colors.success : config.colors.warning)
           .setTitle(`💰 Cashed Out!${balLabel(isDemo)}`)
           .setDescription([
-            `Cashed out at **${current.toFixed(2)}x**`,
+            `Cashed out at **${cashedOutAt.toFixed(2)}x**`,
             `Won **${winnings.toLocaleString()}** ${config.currency}!`,
             `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
           ].join('\n'))
+          .setFooter({ text: gameIdFooter(game.gameId) })
           .setTimestamp();
         reply.edit({ embeds: [embed], components: [] }).catch(() => {});
       }

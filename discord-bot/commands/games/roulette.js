@@ -1,7 +1,8 @@
 const { EmbedBuilder } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, tiePayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
+const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const config = require('../../config');
 
 const RED = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
@@ -48,6 +49,7 @@ module.exports = {
     const betType = betTarget ? getBetType(betTarget) : null;
     if (!betType) return message.reply({ embeds: [errorEmbed('Invalid Bet Type', 'Choose: `red` `black` `green` `even` `odd` `low` `high` or a number `0-36`')] });
 
+    const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
 
     const SPIN = ['🔴','⚫','🟢','🔴','⚫','🔴','⚫'];
@@ -61,7 +63,7 @@ module.exports = {
     }
 
     await new Promise(r => setTimeout(r, 600));
-    const result = Math.floor(Math.random() * 37);
+    const result = Math.floor(game.floats[0] * 37);
     const mult = calcMult(betType, result);
     const won = mult > 0;
     const winnings = won ? calcPayout(bet, mult) : 0;
@@ -69,6 +71,14 @@ module.exports = {
     if (won) addWin(message.author.id, winnings, isDemo);
     recordGame(message.author.id, won, won ? winnings - bet : bet);
     const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+
+    saveGameRecord({
+      gameId: game.gameId, type: 'roulette', userId: message.author.id,
+      serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+      clientSeed: game.clientSeed, nonce: game.nonce,
+      inputs: { betTarget },
+      outcome: { number: result, result: won ? 'win' : 'lose' },
+    });
 
     embed
       .setColor(won ? config.colors.success : config.colors.error)
@@ -80,7 +90,8 @@ module.exports = {
         `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
         '',
         `*Payouts: Color/Even/Odd/High/Low = 2x · Number = 35x · Green = 14x (5% house edge)*`,
-      ].join('\n'));
+      ].join('\n'))
+      .setFooter({ text: gameIdFooter(game.gameId) });
 
     reply.edit({ embeds: [embed] }).catch(() => {});
   },

@@ -2,11 +2,11 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentTyp
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
+const { beginGame, saveGameRecord, deriveMineBoardFromFloats, gameIdFooter } = require('../../utils/fairness');
 const config = require('../../config');
 
-// 4x4 grid = 16 cells → 4 rows of buttons + 1 cashout = 5 rows (Discord max)
 const GRID = 4;
-const TOTAL = GRID * GRID; // 16
+const TOTAL = GRID * GRID;
 
 function calcMultiplier(revealed, mines) {
   const safe = TOTAL - mines;
@@ -31,20 +31,17 @@ module.exports = {
     const gameKey = `mines_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current mines game!')] });
 
+    const game = beginGame(message.author.id, TOTAL);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Mines', userId: message.author.id, bet });
 
-    // Place mines
-    const isMine = Array(TOTAL).fill(false);
-    let placed = 0;
-    while (placed < mineCount) {
-      const idx = Math.floor(Math.random() * TOTAL);
-      if (!isMine[idx]) { isMine[idx] = true; placed++; }
-    }
+    const mineSet = deriveMineBoardFromFloats(game.floats, TOTAL, mineCount);
+    const isMine = Array.from({ length: TOTAL }, (_, i) => mineSet.has(i));
 
-    const state = Array(TOTAL).fill(null); // null | 'gem' | 'mine'
+    const state = Array(TOTAL).fill(null);
     let revealed = 0;
     let gameOver = false;
+    const revealedTiles = [];
 
     const buildRows = (showAll = false) => {
       const rows = [];
@@ -99,8 +96,17 @@ module.exports = {
         recordGame(message.author.id, true, winnings - bet);
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         gameOver = true; collector.stop(); client.activeGames.delete(gameKey);
+
+        saveGameRecord({
+          gameId: game.gameId, type: 'mines', userId: message.author.id,
+          serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+          clientSeed: game.clientSeed, nonce: game.nonce,
+          inputs: { mineCount, revealed: revealedTiles },
+          outcome: { minePositions: [...mineSet], result: 'win' },
+        });
+
         await i.update({
-          embeds: [buildEmbed(`💰 Cashed out at **${mult}x**! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)],
+          embeds: [buildEmbed(`💰 Cashed out at **${mult}x**! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
           components: buildRows(true),
         }).catch(() => {});
         return;
@@ -114,12 +120,22 @@ module.exports = {
         gameOver = true; collector.stop(); client.activeGames.delete(gameKey);
         recordGame(message.author.id, false, bet);
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+
+        saveGameRecord({
+          gameId: game.gameId, type: 'mines', userId: message.author.id,
+          serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+          clientSeed: game.clientSeed, nonce: game.nonce,
+          inputs: { mineCount, revealed: revealedTiles },
+          outcome: { minePositions: [...mineSet], hitMine: idx, result: 'lose' },
+        });
+
         await i.update({
-          embeds: [buildEmbed(`💥 Hit a mine! Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)],
+          embeds: [buildEmbed(`💥 Hit a mine! Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
           components: buildRows(true),
         }).catch(() => {});
       } else {
         state[idx] = 'gem';
+        revealedTiles.push(idx);
         revealed++;
         if (revealed === TOTAL - mineCount) {
           const mult = calcMultiplier(revealed, mineCount);
@@ -128,8 +144,17 @@ module.exports = {
           recordGame(message.author.id, true, winnings - bet);
           gameOver = true; collector.stop(); client.activeGames.delete(gameKey);
           const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+
+          saveGameRecord({
+            gameId: game.gameId, type: 'mines', userId: message.author.id,
+            serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+            clientSeed: game.clientSeed, nonce: game.nonce,
+            inputs: { mineCount, revealed: revealedTiles },
+            outcome: { minePositions: [...mineSet], result: 'win' },
+          });
+
           await i.update({
-            embeds: [buildEmbed(`🎉 All gems found! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)],
+            embeds: [buildEmbed(`🎉 All gems found! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
             components: buildRows(true),
           }).catch(() => {});
         } else {

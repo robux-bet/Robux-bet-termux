@@ -1,9 +1,9 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { getUser, saveUser } = require('../../utils/database');
 const { errorEmbed, successEmbed } = require('../../utils/embeds');
+const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const config = require('../../config');
 
-// All items are cosmetic/showoff — no actual game effect
 const MARKET_ITEMS = [
   {
     id: 'vip_badge',
@@ -135,7 +135,6 @@ module.exports = {
       if (!item) return message.reply({ embeds: [errorEmbed('Not Found', `Unknown item \`${itemId}\`. Use \`.market\` to browse.`)] });
 
       const user = getUser(message.author.id);
-      // Use actual balance for purchases
       if (user.balance < item.price) {
         return message.reply({ embeds: [errorEmbed('Insufficient Actual Balance', [
           `You need **${item.price.toLocaleString()}** ${config.currency} (actual balance).`,
@@ -143,19 +142,30 @@ module.exports = {
         ].join('\n'))] });
       }
 
-      // Mystery box: immediate Robux
       if (item.openable) {
+        const game = beginGame(message.author.id, 1);
         user.balance -= item.price;
-        const reward = Math.floor(Math.random() * 251) + 50; // 50-300
+        const reward = Math.floor(game.floats[0] * 251) + 50;
         user.balance += reward;
         saveUser(message.author.id, user);
+
+        saveGameRecord({
+          gameId: game.gameId, type: 'mystery_box', userId: message.author.id,
+          serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+          clientSeed: game.clientSeed, nonce: game.nonce,
+          inputs: { item: 'mystery_box' },
+          outcome: { reward, result: reward > item.price ? 'win' : 'lose' },
+        });
+
         return message.reply({
           embeds: [new EmbedBuilder().setColor(config.colors.gold).setTitle('📦 Mystery Box Opened!')
             .setDescription([
               `You opened the **Mystery Box** and found **${reward}** ${config.currency}!`,
               `Net ${reward > item.price ? `+${reward - item.price}` : `${reward - item.price}`} ${config.currency}`,
               `💰 Balance: **${user.balance.toLocaleString()}** ${config.currency}`,
-            ].join('\n')).setTimestamp()],
+            ].join('\n'))
+            .setFooter({ text: gameIdFooter(game.gameId) })
+            .setTimestamp()],
         });
       }
 

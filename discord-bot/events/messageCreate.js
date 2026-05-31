@@ -7,7 +7,7 @@ const { getUser, generateStatusCode } = require('../utils/database');
 const botConfig = require('../config');
 
 // Commands that don't require the status check
-const STATUS_EXEMPT = ['mycode'];
+const STATUS_EXEMPT = ['mycode', 'verify'];
 
 console.log("CONFIG PREFIX RAW:", config.prefix);
 

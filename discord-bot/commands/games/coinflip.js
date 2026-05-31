@@ -1,7 +1,8 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, tiePayout, rigged50Win, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
+const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const config = require('../../config');
 
 module.exports = {
@@ -49,6 +50,8 @@ module.exports = {
 };
 
 async function runFlip(message, reply, bet, choice, isDemo) {
+  const game = beginGame(message.author.id, 1);
+
   const ANIM = ['🌀', '🪙', '💫', '🪙', '🌀'];
   const embed = new EmbedBuilder().setColor(config.colors.primary).setTitle(`🪙 Coinflip${balLabel(isDemo)}`).setTimestamp();
   for (const frame of ANIM) {
@@ -57,8 +60,7 @@ async function runFlip(message, reply, bet, choice, isDemo) {
     await new Promise(r => setTimeout(r, 350));
   }
 
-  // Rigged: demo=70% win, actual=30% win
-  const won = rigged50Win(isDemo);
+  const won = game.floats[0] >= 0.5;
   const result = won ? choice : (choice === 'h' ? 't' : 'h');
   const resultLabel = result === 'h' ? '🪙 Heads' : '🟡 Tails';
   const choiceLabel = choice === 'h' ? '🪙 Heads' : '🟡 Tails';
@@ -73,7 +75,7 @@ async function runFlip(message, reply, bet, choice, isDemo) {
       `It's **${resultLabel}**! Your pick: **${choiceLabel}**`,
       `🎉 Won **${payout.toLocaleString()}** ${config.currency}!`,
       `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
-    ].join('\n'));
+    ].join('\n')).setFooter({ text: gameIdFooter(game.gameId) });
   } else {
     recordGame(message.author.id, false, bet);
     const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
@@ -81,7 +83,16 @@ async function runFlip(message, reply, bet, choice, isDemo) {
       `It's **${resultLabel}**! Your pick: **${choiceLabel}**`,
       `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
       `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
-    ].join('\n'));
+    ].join('\n')).setFooter({ text: gameIdFooter(game.gameId) });
   }
+
+  saveGameRecord({
+    gameId: game.gameId, type: 'coinflip', userId: message.author.id,
+    serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+    clientSeed: game.clientSeed, nonce: game.nonce,
+    inputs: { choice },
+    outcome: { result: won ? 'win' : 'lose', resultSide: result },
+  });
+
   reply.edit({ embeds: [embed] }).catch(() => {});
 }

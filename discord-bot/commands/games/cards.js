@@ -1,7 +1,8 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, rigged50Win, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
+const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const config = require('../../config');
 
 const SUITS = ['♠️','♥️','♦️','♣️'];
@@ -60,27 +61,20 @@ module.exports = {
 };
 
 async function resolve(message, reply, bet, choice, isDemo) {
+  const game = beginGame(message.author.id, 2);
   spendBet(message.author.id, bet, isDemo);
   await new Promise(r => setTimeout(r, 700));
 
-  const card = { rank: RANKS[Math.floor(Math.random() * 13)], suit: SUITS[Math.floor(Math.random() * 4)] };
+  const rankIdx = Math.floor(game.floats[0] * 13);
+  const suitIdx = Math.floor(game.floats[1] * 4);
+  const card = { rank: RANKS[rankIdx], suit: SUITS[suitIdx] };
   const isRed = RED_SUITS.includes(card.suit);
-  const colorName = isRed ? 'red' : 'black';
   const suitName = SUIT_NAMES[card.suit];
 
-  // Rig 50/50 color bets; suit bets use natural odds
   let won;
-  if (choice === 'red' || choice === 'black') {
-    won = rigged50Win(isDemo);
-    // Force card color to match the rigged result
-    if (won && choice !== colorName) {
-      card.suit = choice === 'red' ? '♥️' : '♠️';
-    } else if (!won && choice === colorName) {
-      card.suit = choice === 'red' ? '♠️' : '♥️';
-    }
-  } else {
-    won = SUIT_NAMES[card.suit] === choice;
-  }
+  if (choice === 'red') won = isRed;
+  else if (choice === 'black') won = !isRed;
+  else won = suitName === choice;
 
   const { mult } = BETS[choice];
   const winnings = won ? calcPayout(bet, mult) : 0;
@@ -88,16 +82,25 @@ async function resolve(message, reply, bet, choice, isDemo) {
   recordGame(message.author.id, won, won ? winnings - bet : bet);
   const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
 
+  saveGameRecord({
+    gameId: game.gameId, type: 'cards', userId: message.author.id,
+    serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+    clientSeed: game.clientSeed, nonce: game.nonce,
+    inputs: { choice },
+    outcome: { card: `${card.rank}${card.suit}`, result: won ? 'win' : 'lose' },
+  });
+
   const embed = new EmbedBuilder()
     .setColor(won ? config.colors.success : config.colors.error)
     .setTitle(`🃏 Card Guess Result${balLabel(isDemo)}`)
     .setDescription([
-      `The card was: **${card.rank}${card.suit}** (${RED_SUITS.includes(card.suit) ? '🔴 Red' : '⚫ Black'})`,
+      `The card was: **${card.rank}${card.suit}** (${isRed ? '🔴 Red' : '⚫ Black'})`,
       `Your guess: **${BETS[choice].label}** (${mult}x)`,
       '',
       won ? `🎉 Won **${winnings.toLocaleString()}** ${config.currency}!` : `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
       `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
     ].join('\n'))
+    .setFooter({ text: gameIdFooter(game.gameId) })
     .setTimestamp();
 
   reply.edit({ embeds: [embed], components: [] }).catch(() => {});

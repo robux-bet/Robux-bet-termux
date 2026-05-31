@@ -1,16 +1,15 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, tiePayout, rigged50Win, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, tiePayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
+const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const config = require('../../config');
 
 const SUITS = ['♠️','♥️','♦️','♣️'];
 const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 
-function newDeck() {
-  const d = [];
-  for (const s of SUITS) for (const r of RANKS) d.push({ r, s });
-  return d.sort(() => Math.random() - 0.5);
+function cardFromFloats(f0, f1) {
+  return { r: RANKS[Math.floor(f0 * 13)], s: SUITS[Math.floor(f1 * 4)] };
 }
 
 function cardVal(r) {
@@ -61,47 +60,38 @@ module.exports = {
 };
 
 async function runBaccarat(message, reply, bet, betOn, isDemo) {
+  const game = beginGame(message.author.id, 12);
   spendBet(message.author.id, bet, isDemo);
 
-  const deck = newDeck();
-  const player = [deck.pop(), deck.pop()];
-  const banker = [deck.pop(), deck.pop()];
+  let fi = 0;
+  const nextCard = () => cardFromFloats(game.floats[fi++], game.floats[fi++]);
+
+  const player = [nextCard(), nextCard()];
+  const banker = [nextCard(), nextCard()];
   let pVal = handVal(player), bVal = handVal(banker);
 
   const natural = pVal >= 8 || bVal >= 8;
   if (!natural && pVal <= 5) {
-    const draw = deck.pop(); player.push(draw); pVal = handVal(player);
+    const draw = nextCard(); player.push(draw); pVal = handVal(player);
     const pThird = cardVal(draw.r);
     if (bVal <= 2 || (bVal === 3 && pThird !== 8) || (bVal === 4 && [2,3,4,5,6,7].includes(pThird)) ||
         (bVal === 5 && [4,5,6,7].includes(pThird)) || (bVal === 6 && [6,7].includes(pThird))) {
-      banker.push(deck.pop()); bVal = handVal(banker);
+      banker.push(nextCard()); bVal = handVal(banker);
     }
   } else if (!natural && bVal <= 5) {
-    banker.push(deck.pop()); bVal = handVal(banker);
+    banker.push(nextCard()); bVal = handVal(banker);
   }
 
-  // Rigged: override result for p/b bets using 70/30 logic
-  let trueResult;
-  if (betOn === 't') {
-    // Tie bet: natural odds
-    trueResult = pVal > bVal ? 'p' : bVal > pVal ? 'b' : 't';
-  } else {
-    // Rig: demo 70% win, actual 30% win
-    const playerWins = rigged50Win(isDemo);
-    trueResult = playerWins ? betOn : (betOn === 'p' ? 'b' : 'p');
-  }
-
+  const trueResult = pVal > bVal ? 'p' : bVal > pVal ? 'b' : 't';
   const betLabels = { p: '👤 Player', b: '🏦 Banker', t: '🤝 Tie' };
   let won = betOn === trueResult;
   let winnings = 0;
 
-  spendBet; // already spent above
   if (won) {
     const mult = betOn === 't' ? 8 : 2;
     winnings = calcPayout(bet, mult);
     addWin(message.author.id, winnings, isDemo);
   } else if (trueResult === 't' && betOn !== 't') {
-    // Tie pushes non-tie bets, but house takes 4%
     const push = tiePayout(bet);
     addWin(message.author.id, push, isDemo);
     winnings = push;
@@ -109,6 +99,17 @@ async function runBaccarat(message, reply, bet, betOn, isDemo) {
 
   recordGame(message.author.id, won, won ? winnings - bet : bet);
   const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+
+  saveGameRecord({
+    gameId: game.gameId, type: 'baccarat', userId: message.author.id,
+    serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
+    clientSeed: game.clientSeed, nonce: game.nonce,
+    inputs: { betOn },
+    outcome: {
+      playerHand: handStr(player), bankerHand: handStr(banker),
+      pVal, bVal, winner: trueResult, result: won ? 'win' : trueResult === 't' && betOn !== 't' ? 'push' : 'lose',
+    },
+  });
 
   const embed = new EmbedBuilder()
     .setColor(won ? config.colors.success : trueResult === 't' && betOn !== 't' ? config.colors.warning : config.colors.error)
@@ -124,6 +125,7 @@ async function runBaccarat(message, reply, bet, betOn, isDemo) {
         `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
       `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
     ].join('\n'))
+    .setFooter({ text: gameIdFooter(game.gameId) })
     .setTimestamp();
 
   reply.edit({ embeds: [embed], components: [] }).catch(() => {});
