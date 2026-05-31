@@ -113,7 +113,8 @@ module.exports = {
         `You received **${result.value}** ${config.currency}`,
         '',
         `💰 New balance: **${newBal.toLocaleString()}** ${config.currency}`,
-      ].join('\n'));
+      ].join('\n'))
+      .setFooter({ text: 'Best Roblox Gambling Server · discord.gg/n7wWqamv6b' });
 
     reply.edit({ embeds: [embed] }).catch(() => {});
   },
