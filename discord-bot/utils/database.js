@@ -1,7 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const DB_PATH = path.join(__dirname, '../data/users.json');
+
+function generateStatusCode(userId) {
+  return crypto.createHash('sha256').update('statuscode:' + userId).digest('hex').slice(0, 8).toUpperCase();
+}
 
 function loadDB() {
   if (!fs.existsSync(DB_PATH)) fs.writeFileSync(DB_PATH, JSON.stringify({}, null, 2));
@@ -21,7 +26,8 @@ function getUser(userId) {
       hasClaimedDemo: false,
       vault: 0,
       lastDaily: null,
-      seed: require('crypto').createHash('sha256').update(userId + Date.now().toString()).digest('hex').slice(0, 16),
+      statusCode: generateStatusCode(userId),
+      seed: crypto.createHash('sha256').update(userId + Date.now().toString()).digest('hex').slice(0, 16),
       nonce: 0,
       totalWon: 0,
       totalLost: 0,
@@ -32,6 +38,7 @@ function getUser(userId) {
   // Ensure new fields on existing users
   const u = db[userId];
   if (u.demoBalance === undefined) { u.demoBalance = 0; u.hasClaimedDemo = false; saveDB(db); }
+  if (!u.statusCode) { u.statusCode = generateStatusCode(userId); saveDB(db); }
   return u;
 }
 
@@ -138,4 +145,5 @@ module.exports = {
   getVault, setVault,
   getSeed, setSeed, incrementNonce,
   recordGame,
+  generateStatusCode,
 };
