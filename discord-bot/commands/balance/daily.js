@@ -33,7 +33,9 @@ function hasRequiredStatus(member, code) {
   const presence = member?.presence;
   if (!presence) return false;
   const custom = presence.activities.find(a => a.type === 4);
-  return !!(custom?.state?.toLowerCase().includes(`best roblox gambling servers discord.gg/${code.toLowerCase()}`));
+  const statusText = (custom?.state || '').toLowerCase();
+  return statusText.includes(`discord.gg/${config.serverInvite.toLowerCase()}`) &&
+         statusText.includes(`code:${code.toLowerCase()}`);
 }
 
 const SPIN_FRAMES = ['🌀', '💫', '⭐', '✨', '🌟'];
@@ -66,7 +68,7 @@ module.exports = {
 
     if (!allMet) {
       const req = (met, label) => `${met ? '✅' : '❌'} ${label}`;
-      const statusText = `best roblox gambling servers discord.gg/${code}`;
+      const statusText = `best roblox gambling servers discord.gg/${config.serverInvite} code:${code}`;
       const unmetCount = [hasStatus, hasWagered, hasDeposited].filter(v => !v).length;
 
       const embed = new EmbedBuilder()

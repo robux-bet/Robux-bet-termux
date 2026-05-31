@@ -6,6 +6,7 @@ module.exports = {
   adminRoleId: process.env.ADMIN_ROLE_ID || '',
   depositChannelId: process.env.DEPOSIT_CHANNEL_ID || '',
   withdrawChannelId: process.env.WITHDRAW_CHANNEL_ID || '',
+  serverInvite: process.env.SERVER_INVITE || 'yourserver',
   currency: 'Robux',
   currencyEmoji: '💎',
   dailyMin: 1,
