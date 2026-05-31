@@ -1,4 +1,4 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { getUser, saveUser, addBalance } = require('../../utils/database');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
@@ -66,20 +66,48 @@ module.exports = {
 
     if (!allMet) {
       const req = (met, label) => `${met ? '✅' : '❌'} ${label}`;
+      const statusText = `best roblox gambling servers discord.gg/${code}`;
+      const unmetCount = [hasStatus, hasWagered, hasDeposited].filter(v => !v).length;
+
       const embed = new EmbedBuilder()
         .setColor(config.colors.error)
-        .setTitle('🎡 Daily Requirements Not Met')
+        .setTitle(`🎡 Daily — ${unmetCount} Requirement${unmetCount !== 1 ? 's' : ''} Not Met`)
         .setDescription([
-          'You must meet **all 3 requirements** to spin the daily wheel:',
+          req(hasStatus,    `Set a custom Discord status containing your invite code`),
+          req(hasWagered,   'Wager at least **1 Robux** (real balance) in the past 24h'),
+          req(hasDeposited, 'Have at least **1 Robux** deposited in the past 24h'),
           '',
-          req(hasStatus,   `Custom status set to:\n\`\`\`best roblox gambling servers discord.gg/${code}\`\`\``),
-          req(hasWagered,  'Wagered at least **1 Robux** in the past 24h'),
-          req(hasDeposited,'Deposited at least **1 Robux** in the past 24h'),
-          '',
-          hasStatus ? '' : `> Run \`.mycode\` to see your required status text.`,
+          !hasStatus ? '> Click **Copy Status** below to get your exact required status text.' : '',
         ].filter(l => l !== null).join('\n'))
         .setTimestamp();
-      return message.reply({ embeds: [embed] });
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('daily_copystatus')
+          .setLabel('📋 Copy My Status')
+          .setStyle(ButtonStyle.Secondary),
+      );
+
+      const reply = await message.reply({ embeds: [embed], components: [row] });
+
+      const collector = reply.createMessageComponentCollector({
+        componentType: ComponentType.Button,
+        filter: i => i.user.id === message.author.id,
+        time: 60000,
+      });
+
+      collector.on('collect', async i => {
+        await i.reply({
+          content: `Set this as your **custom Discord status** (tap and hold to copy):\n\`\`\`${statusText}\`\`\`\nThen run \`.daily\` again!`,
+          ephemeral: true,
+        });
+      });
+
+      collector.on('end', () => {
+        reply.edit({ components: [] }).catch(() => {});
+      });
+
+      return;
     }
 
     const result = weightedRandom();
