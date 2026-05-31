@@ -1,16 +1,24 @@
-const config = require('../config');
+const config = {
+  prefix: "."
+};
 const { errorEmbed } = require('../utils/embeds');
+
+console.log("CONFIG PREFIX RAW:", config.prefix);
 
 module.exports = {
   name: 'messageCreate',
   async execute(message, client) {
+    console.log("PREFIX:", config.prefix);
+    console.log("MESSAGE RECEIVED:", message.content);
+
     if (message.author.bot) return;
     if (!message.content.startsWith(config.prefix)) return;
 
     const args = message.content.slice(config.prefix.length).trim().split(/ +/);
-    const commandName = args.shift().toLowerCase();
+const commandName = args.shift().toLowerCase();
+console.log("COMMAND:", commandName);
 
-    let command = client.commands.get(commandName);
+let command = client.commands.get(commandName);
     if (!command) {
       const alias = client.aliases.get(commandName);
       if (alias) command = client.commands.get(alias);

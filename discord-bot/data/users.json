@@ -1,1 +1,12 @@
-{}
+{
+  "1456636693095383119": {
+    "balance": 9999744,
+    "vault": 0,
+    "lastDaily": null,
+    "seed": "e790f976cc4a5284",
+    "nonce": 0,
+    "totalWon": 201,
+    "totalLost": 1424,
+    "gamesPlayed": 35
+  }
+}
