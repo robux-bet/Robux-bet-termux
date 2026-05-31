@@ -79,6 +79,7 @@ module.exports = {
 
     // Final result
     user.lastDaily = now;
+    saveUser(message.author.id, user);
     addBalance(message.author.id, result.value);
     const newBal = getUser(message.author.id).balance;
 
