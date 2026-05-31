@@ -1,85 +1,81 @@
 const { EmbedBuilder } = require('discord.js');
-const { getUser, removeBalance, addBalance, recordGame } = require('../../utils/database');
+const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
+const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
+// Multipliers are floored — so 1.x becomes 1x (break even), 2.x becomes 2x, etc.
 const PAYOUT_TABLES = {
-  8:  [5.6, 2.1, 1.1, 1.0, 0.5, 1.0, 1.1, 2.1, 5.6],
-  12: [8.9, 3.0, 1.4, 1.1, 1.0, 0.5, 1.0, 1.1, 1.4, 3.0, 8.9],
-  16: [16, 9, 2, 1.4, 1.4, 1.2, 1.1, 1.0, 0.5, 1.0, 1.1, 1.2, 1.4, 1.4, 2, 9, 16],
+  8:  [5, 2, 1, 1, 0, 1, 1, 2, 5],
+  12: [8, 3, 1, 1, 1, 0, 1, 1, 1, 3, 8],
+  16: [15, 9, 2, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 2, 9, 15],
 };
 
 function simulatePlinko(rows) {
   let pos = 0;
-  for (let i = 0; i < rows; i++) {
-    pos += Math.random() < 0.5 ? 0 : 1;
-  }
+  for (let i = 0; i < rows; i++) pos += Math.random() < 0.5 ? 0 : 1;
   return pos;
-}
-
-function buildPlinkoBoard(rows, finalPos) {
-  const lines = [];
-  for (let r = 0; r <= rows; r++) {
-    const pegs = r + 1;
-    const line = Array(pegs).fill('🔘');
-    lines.push(' '.repeat(rows - r) + line.join(' '));
-  }
-  const payouts = PAYOUT_TABLES[rows] || PAYOUT_TABLES[8];
-  const payoutLine = payouts.map((p, i) => i === finalPos ? `[**${p}x**]` : `${p}x`).join(' ');
-  lines.push('\n' + payoutLine);
-  return lines.join('\n');
 }
 
 module.exports = {
   name: 'plinko',
   description: 'Drop the ball through the Plinko board',
-  usage: '.plinko <bet> [8|12|16]',
+  usage: '.plinko <bet|all|half> [8|12|16]',
   async execute(message, args) {
-    const bet = parseInt(args[0]);
-    if (isNaN(bet) || bet <= 0) return message.reply({ embeds: [errorEmbed('Invalid Bet', '`Usage: .plinko <bet> [8|12|16]`')] });
+    const parsed = parseBet(message.author.id, args[0]);
+    if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
+    const { bet, isDemo } = parsed;
 
     const rows = [8, 12, 16].includes(parseInt(args[1])) ? parseInt(args[1]) : 8;
 
-    const user = getUser(message.author.id);
-    if (user.balance < bet) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `You only have **${user.balance.toLocaleString()}** ${config.currency}`)] });
-
-    removeBalance(message.author.id, bet);
+    spendBet(message.author.id, bet, isDemo);
 
     const finalPos = simulatePlinko(rows);
-    const payouts = PAYOUT_TABLES[rows] || PAYOUT_TABLES[8];
-    const mult = payouts[finalPos] || 0.5;
-    const winnings = Math.floor(bet * mult);
-    const won = winnings >= bet;
+    const payouts = PAYOUT_TABLES[rows];
+    const mult = payouts[finalPos] ?? 0;
 
-    addBalance(message.author.id, winnings);
-    recordGame(message.author.id, won, won ? winnings - bet : bet - winnings);
-    const newBal = getUser(message.author.id).balance;
+    // calcPayout with floor already applied (mults are integers here)
+    // 0 = lose everything, 1+ = apply house edge
+    let winnings;
+    if (mult === 0) {
+      winnings = 0;
+    } else if (mult === 1) {
+      // Break-even slot: return bet (no house edge on pure break-even)
+      winnings = bet;
+    } else {
+      winnings = calcPayout(bet, mult);
+    }
+
+    if (winnings > 0) addWin(message.author.id, winnings, isDemo);
+    recordGame(message.author.id, winnings > bet, winnings > bet ? winnings - bet : bet - winnings);
+    const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
 
     const embed = new EmbedBuilder()
       .setColor(config.colors.primary)
-      .setTitle('🎯 Plinko')
-      .setDescription(`🟡 Dropping ball...\nRows: **${rows}**`)
+      .setTitle(`🎯 Plinko${balLabel(isDemo)}`)
+      .setDescription(`🟡 Dropping ball... (${rows} rows)`)
       .setTimestamp();
-
     const reply = await message.reply({ embeds: [embed] });
 
-    for (let i = 0; i < 3; i++) {
-      await new Promise(r => setTimeout(r, 700));
-      embed.setDescription(`🟡 Falling... Row ${i * Math.floor(rows / 3) + 1}/${rows}`);
+    for (let i = 0; i < 4; i++) {
+      await new Promise(r => setTimeout(r, 550));
+      embed.setDescription(`🟡 Falling... Row ${(i + 1) * Math.floor(rows / 4)}/${rows}`);
       await reply.edit({ embeds: [embed] }).catch(() => {});
     }
-
     await new Promise(r => setTimeout(r, 600));
 
+    const payoutLine = payouts.map((p, i) => i === finalPos ? `**[${p}x]**` : `${p}x`).join(' · ');
+
     embed
-      .setColor(won ? config.colors.success : config.colors.error)
+      .setColor(winnings > bet ? config.colors.success : winnings === bet ? config.colors.warning : config.colors.error)
       .setDescription([
-        `\`\`\``,
-        buildPlinkoBoard(Math.min(rows, 8), Math.floor(finalPos * (Math.min(rows, 8) / rows))),
-        `\`\`\``,
-        `Ball landed in slot **${finalPos + 1}** → **${mult}x**`,
-        won ? `🎉 Won **${winnings.toLocaleString()}** ${config.currency}!` : `😢 Got back **${winnings.toLocaleString()}** ${config.currency}.`,
-        `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}`,
+        payoutLine,
+        '',
+        `Ball landed: slot **${finalPos + 1}** → **${mult}x**`,
+        winnings > bet ? `🎉 Won **${winnings.toLocaleString()}** ${config.currency}!` :
+          winnings === bet ? `🤝 Break even — got **${winnings.toLocaleString()}** ${config.currency} back.` :
+          `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
+        `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
       ].join('\n'));
 
     reply.edit({ embeds: [embed] }).catch(() => {});

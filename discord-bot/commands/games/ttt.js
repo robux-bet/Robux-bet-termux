@@ -1,54 +1,8 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const { getUser, removeBalance, addBalance, recordGame } = require('../../utils/database');
+const { spendBet, addWin, getUser, recordGame, getActivePool } = require('../../utils/database');
+const { parseBet, tiePayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
-
-// Unbeatable minimax AI
-function minimax(board, isMax, alpha, beta) {
-  const w = checkWinner(board);
-  if (w === 'O') return 10;
-  if (w === 'X') return -10;
-  if (!board.includes(null)) return 0;
-
-  if (isMax) {
-    let best = -Infinity;
-    for (let i = 0; i < 9; i++) {
-      if (!board[i]) {
-        board[i] = 'O';
-        best = Math.max(best, minimax(board, false, alpha, beta));
-        board[i] = null;
-        alpha = Math.max(alpha, best);
-        if (beta <= alpha) break;
-      }
-    }
-    return best;
-  } else {
-    let best = Infinity;
-    for (let i = 0; i < 9; i++) {
-      if (!board[i]) {
-        board[i] = 'X';
-        best = Math.min(best, minimax(board, true, alpha, beta));
-        board[i] = null;
-        beta = Math.min(beta, best);
-        if (beta <= alpha) break;
-      }
-    }
-    return best;
-  }
-}
-
-function bestMove(board) {
-  let best = -Infinity, move = -1;
-  for (let i = 0; i < 9; i++) {
-    if (!board[i]) {
-      board[i] = 'O';
-      const score = minimax(board, false, -Infinity, Infinity);
-      board[i] = null;
-      if (score > best) { best = score; move = i; }
-    }
-  }
-  return move;
-}
 
 function checkWinner(board) {
   const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
@@ -81,132 +35,137 @@ function buildRows(board, disabled = false) {
 module.exports = {
   name: 'ttt',
   aliases: ['tictactoe'],
-  description: 'Tic Tac Toe vs Unbeatable AI or another player',
-  usage: '.ttt <bet> [@user]',
+  description: 'Tic Tac Toe — PvP only! Challenge another player.',
+  usage: '.ttt <bet|all|half> @user',
   guildOnly: true,
   async execute(message, args, client) {
-    const bet = parseInt(args[0]);
-    if (isNaN(bet) || bet <= 0) return message.reply({ embeds: [errorEmbed('Invalid Bet', '`Usage: .ttt <bet> [@user]`')] });
-
-    const user = getUser(message.author.id);
-    if (user.balance < bet) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `You only have **${user.balance.toLocaleString()}** ${config.currency}`)] });
+    const parsed = parseBet(message.author.id, args[0]);
+    if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
+    const { bet, isDemo } = parsed;
 
     const opponent = message.mentions.users.first();
-    const vsAI = !opponent || opponent.bot;
-
-    if (!vsAI) {
-      if (opponent.id === message.author.id) return message.reply({ embeds: [errorEmbed('Invalid', 'You cannot play against yourself.')] });
-      const oppUser = getUser(opponent.id);
-      if (oppUser.balance < bet) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `${opponent.username} doesn't have enough ${config.currency}.`)] });
+    if (!opponent || opponent.bot || opponent.id === message.author.id) {
+      return message.reply({ embeds: [errorEmbed('PvP Only', 'Tic Tac Toe is PvP only — mention an opponent!\n`Usage: .ttt <bet> @user`')] });
     }
 
+    const oppPool = getActivePool(opponent.id);
+    if (oppPool.amount < bet) {
+      return message.reply({ embeds: [errorEmbed('Insufficient Funds', `${opponent.username} doesn't have enough ${config.currency}.`)] });
+    }
+
+    const oppIsDemo = oppPool.isDemo;
     const gameKey = `ttt_${message.author.id}`;
-    if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current TTT game first!')] });
+    if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current TTT!')] });
 
-    removeBalance(message.author.id, bet);
-    if (!vsAI) removeBalance(opponent.id, bet);
-    client.activeGames.set(gameKey, { name: 'Tic Tac Toe', userId: message.author.id, bet });
-
-    const board = Array(9).fill(null);
-    let currentPlayer = message.author; // X always goes first
-    let gameOver = false;
-
-    const buildEmbed = (status = '') => new EmbedBuilder()
+    // Accept challenge
+    const challengeRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('ttt_accept').setLabel('✅ Accept').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('ttt_decline').setLabel('❌ Decline').setStyle(ButtonStyle.Danger),
+    );
+    const challengeEmbed = new EmbedBuilder()
       .setColor(config.colors.primary)
-      .setTitle('❌ Tic Tac Toe')
+      .setTitle('❌⭕ TTT Challenge')
       .setDescription([
-        vsAI ? `**You (✖) vs AI (⭕)**` : `**${message.author.username} (✖) vs ${opponent.username} (⭕)**`,
-        status || (vsAI ? `Your turn! You are ✖` : `${currentPlayer.username}'s turn (${currentPlayer.id === message.author.id ? '✖' : '⭕'})`),
+        `${message.author} challenged ${opponent} to **Tic Tac Toe**!`,
+        `Bet: **${bet.toLocaleString()}** ${config.currency} each`,
+        `${opponent.username}, click **Accept**!`,
       ].join('\n'))
       .setTimestamp();
+    const challengeMsg = await message.reply({ embeds: [challengeEmbed], components: [challengeRow] });
 
-    const reply = await message.reply({ embeds: [buildEmbed()], components: buildRows(board) });
-
-    const collector = reply.createMessageComponentCollector({
+    const acceptCollector = challengeMsg.createMessageComponentCollector({
       componentType: ComponentType.Button,
-      filter: i => {
-        if (vsAI) return i.user.id === message.author.id;
-        return i.user.id === currentPlayer.id;
-      },
-      time: 120000,
+      filter: i => i.user.id === opponent.id,
+      time: 30000, max: 1,
     });
 
-    async function finishGame(winner, updateFn) {
-      gameOver = true;
-      client.activeGames.delete(gameKey);
-      collector.stop();
-
-      let desc, color;
-      if (!winner) {
-        // Draw — return bets
-        addBalance(message.author.id, bet);
-        if (!vsAI) addBalance(opponent.id, bet);
-        desc = `🤝 **Draw!** Bets returned.`;
-        color = config.colors.warning;
-      } else if (vsAI) {
-        if (winner === 'X') {
-          addBalance(message.author.id, bet * 2);
-          recordGame(message.author.id, true, bet);
-          desc = `🎉 **You won!** +**${bet.toLocaleString()}** ${config.currency}!`;
-          color = config.colors.success;
-        } else {
-          recordGame(message.author.id, false, bet);
-          desc = `🤖 **AI wins!** Lost **${bet.toLocaleString()}** ${config.currency}.`;
-          color = config.colors.error;
-        }
-      } else {
-        const winnerUser = winner === 'X' ? message.author : opponent;
-        const loserUser = winner === 'X' ? opponent : message.author;
-        addBalance(winnerUser.id, bet * 2);
-        recordGame(winnerUser.id, true, bet);
-        recordGame(loserUser.id, false, bet);
-        desc = `🏆 **${winnerUser.username} wins!** +**${bet.toLocaleString()}** ${config.currency}!`;
-        color = config.colors.success;
+    acceptCollector.on('collect', async i => {
+      if (i.customId === 'ttt_decline') {
+        await i.update({ embeds: [new EmbedBuilder().setColor(config.colors.error).setTitle('TTT Declined').setDescription(`${opponent.username} declined.`).setTimestamp()], components: [] });
+        return;
       }
-
-      const newBal = getUser(message.author.id).balance;
-      const embed = new EmbedBuilder().setColor(color).setTitle('❌ Tic Tac Toe')
-        .setDescription([desc, `💰 ${message.author.username}'s balance: **${newBal.toLocaleString()}** ${config.currency}`].join('\n')).setTimestamp();
-      await updateFn({ embeds: [embed], components: buildRows(board, true) }).catch(() => {});
-    }
-
-    collector.on('collect', async i => {
-      const idx = parseInt(i.customId.replace('ttt_', ''));
-      if (board[idx]) return i.deferUpdate();
-
-      board[idx] = currentPlayer.id === message.author.id ? 'X' : 'O';
       await i.deferUpdate();
 
-      const winner = checkWinner(board);
-      if (winner || !board.includes(null)) {
-        await reply.edit({ components: buildRows(board) }).catch(() => {});
-        return finishGame(winner, fn => reply.edit(fn));
+      spendBet(message.author.id, bet, isDemo);
+      spendBet(opponent.id, bet, oppIsDemo);
+      client.activeGames.set(gameKey, { name: 'Tic Tac Toe', userId: message.author.id, bet });
+
+      const board = Array(9).fill(null);
+      let currentPlayer = message.author;
+      let gameOver = false;
+
+      const buildEmbed = (status = '') => new EmbedBuilder()
+        .setColor(config.colors.primary)
+        .setTitle(`❌⭕ Tic Tac Toe${balLabel(isDemo)}`)
+        .setDescription([
+          `**${message.author.username} (✖) vs ${opponent.username} (⭕)**`,
+          status || `${currentPlayer.username}'s turn (${currentPlayer.id === message.author.id ? '✖' : '⭕'})`,
+        ].join('\n'))
+        .setTimestamp();
+
+      await challengeMsg.edit({ embeds: [buildEmbed()], components: buildRows(board) });
+
+      const collector = challengeMsg.createMessageComponentCollector({
+        componentType: ComponentType.Button,
+        filter: i => i.user.id === currentPlayer.id && i.customId.startsWith('ttt_'),
+        time: 120000,
+      });
+
+      async function endGame(winner) {
+        gameOver = true; client.activeGames.delete(gameKey); collector.stop();
+        let desc, color;
+        const pot = bet * 2;
+        if (!winner) {
+          const push = tiePayout(bet);
+          addWin(message.author.id, push, isDemo);
+          addWin(opponent.id, push, oppIsDemo);
+          desc = `🤝 **Draw!** Each player gets back **${push.toLocaleString()}** ${config.currency} (house took 4%).`;
+          color = config.colors.warning;
+        } else if (winner === 'X') {
+          addWin(message.author.id, pot, isDemo);
+          recordGame(message.author.id, true, bet);
+          recordGame(opponent.id, false, bet);
+          desc = `🏆 **${message.author.username} wins!** +**${bet.toLocaleString()}** ${config.currency}!`;
+          color = config.colors.success;
+        } else {
+          addWin(opponent.id, pot, oppIsDemo);
+          recordGame(opponent.id, true, bet);
+          recordGame(message.author.id, false, bet);
+          desc = `🏆 **${opponent.username} wins!** +**${bet.toLocaleString()}** ${config.currency}!`;
+          color = config.colors.success;
+        }
+        const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+        const embed = new EmbedBuilder().setColor(color).setTitle('❌⭕ TTT Result')
+          .setDescription([desc, `💰 ${message.author.username}'s balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`].join('\n')).setTimestamp();
+        await challengeMsg.edit({ embeds: [embed], components: buildRows(board, true) }).catch(() => {});
       }
 
-      if (vsAI) {
-        // AI move immediately
-        await reply.edit({ embeds: [buildEmbed('🤖 AI thinking...')], components: buildRows(board, true) }).catch(() => {});
-        await new Promise(r => setTimeout(r, 700));
-        const aiMove = bestMove(board);
-        board[aiMove] = 'O';
-        const aiWinner = checkWinner(board);
-        if (aiWinner || !board.includes(null)) {
-          return finishGame(aiWinner, fn => reply.edit(fn));
+      collector.on('collect', async i => {
+        const idx = parseInt(i.customId.replace('ttt_', ''));
+        if (isNaN(idx) || board[idx]) return i.deferUpdate();
+        board[idx] = currentPlayer.id === message.author.id ? 'X' : 'O';
+        await i.deferUpdate();
+        const winner = checkWinner(board);
+        if (winner || !board.includes(null)) {
+          await challengeMsg.edit({ components: buildRows(board) }).catch(() => {});
+          return endGame(winner);
         }
-        await reply.edit({ embeds: [buildEmbed()], components: buildRows(board) }).catch(() => {});
-      } else {
         currentPlayer = currentPlayer.id === message.author.id ? opponent : message.author;
-        await reply.edit({ embeds: [buildEmbed()], components: buildRows(board) }).catch(() => {});
-      }
+        await challengeMsg.edit({ embeds: [buildEmbed()], components: buildRows(board) }).catch(() => {});
+      });
+
+      collector.on('end', (_, reason) => {
+        client.activeGames.delete(gameKey);
+        if (reason === 'time' && !gameOver) {
+          addWin(message.author.id, bet, isDemo);
+          addWin(opponent.id, bet, oppIsDemo);
+          challengeMsg.edit({ content: '⏰ Game timed out. Bets returned.', components: [] }).catch(() => {});
+        }
+      });
     });
 
-    collector.on('end', (_, reason) => {
-      if (reason === 'time' && !gameOver) {
-        client.activeGames.delete(gameKey);
-        addBalance(message.author.id, bet);
-        if (!vsAI) addBalance(opponent.id, bet);
-        reply.edit({ content: '⏰ Game timed out. Bets returned.', components: [] }).catch(() => {});
-      }
+    acceptCollector.on('end', (_, reason) => {
+      if (reason === 'time') challengeMsg.edit({ content: '⏰ Challenge expired.', components: [] }).catch(() => {});
     });
   },
 };

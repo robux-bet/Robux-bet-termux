@@ -4,14 +4,8 @@ const path = require('path');
 const DB_PATH = path.join(__dirname, '../data/users.json');
 
 function loadDB() {
-  if (!fs.existsSync(DB_PATH)) {
-    fs.writeFileSync(DB_PATH, JSON.stringify({}, null, 2));
-  }
-  try {
-    return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-  } catch {
-    return {};
-  }
+  if (!fs.existsSync(DB_PATH)) fs.writeFileSync(DB_PATH, JSON.stringify({}, null, 2));
+  try { return JSON.parse(fs.readFileSync(DB_PATH, 'utf8')); } catch { return {}; }
 }
 
 function saveDB(data) {
@@ -22,10 +16,12 @@ function getUser(userId) {
   const db = loadDB();
   if (!db[userId]) {
     db[userId] = {
-      balance: 100,
+      balance: 0,
+      demoBalance: 0,
+      hasClaimedDemo: false,
       vault: 0,
       lastDaily: null,
-      seed: generateDefaultSeed(userId),
+      seed: require('crypto').createHash('sha256').update(userId + Date.now().toString()).digest('hex').slice(0, 16),
       nonce: 0,
       totalWon: 0,
       totalLost: 0,
@@ -33,7 +29,10 @@ function getUser(userId) {
     };
     saveDB(db);
   }
-  return db[userId];
+  // Ensure new fields on existing users
+  const u = db[userId];
+  if (u.demoBalance === undefined) { u.demoBalance = 0; u.hasClaimedDemo = false; saveDB(db); }
+  return u;
 }
 
 function saveUser(userId, userData) {
@@ -42,82 +41,101 @@ function saveUser(userId, userData) {
   saveDB(db);
 }
 
+// Which pool is the user currently betting from?
+// Actual (balance > 0) takes priority. Otherwise demo.
+function getActivePool(userId) {
+  const u = getUser(userId);
+  if (u.balance > 0) return { amount: u.balance, isDemo: false };
+  return { amount: u.demoBalance || 0, isDemo: true };
+}
+
+function isDemo(userId) {
+  return getActivePool(userId).isDemo;
+}
+
+function claimDemo(userId) {
+  const u = getUser(userId);
+  if (u.hasClaimedDemo) return false;
+  u.demoBalance = 1000;
+  u.hasClaimedDemo = true;
+  saveUser(userId, u);
+  return true;
+}
+
+function spendBet(userId, amount, demo) {
+  const u = getUser(userId);
+  if (demo) u.demoBalance = Math.max(0, (u.demoBalance || 0) - amount);
+  else u.balance = Math.max(0, u.balance - amount);
+  saveUser(userId, u);
+}
+
+function addWin(userId, amount, demo) {
+  const u = getUser(userId);
+  if (demo) u.demoBalance = (u.demoBalance || 0) + amount;
+  else u.balance = u.balance + amount;
+  saveUser(userId, u);
+}
+
 function addBalance(userId, amount) {
-  const user = getUser(userId);
-  user.balance = Math.max(0, user.balance + amount);
-  saveUser(userId, user);
-  return user.balance;
+  const u = getUser(userId);
+  u.balance = Math.max(0, u.balance + amount);
+  saveUser(userId, u);
+  return u.balance;
 }
 
 function removeBalance(userId, amount) {
-  const user = getUser(userId);
-  user.balance = Math.max(0, user.balance - amount);
-  saveUser(userId, user);
-  return user.balance;
+  const u = getUser(userId);
+  u.balance = Math.max(0, u.balance - amount);
+  saveUser(userId, u);
+  return u.balance;
 }
 
 function setBalance(userId, amount) {
-  const user = getUser(userId);
-  user.balance = Math.max(0, amount);
-  saveUser(userId, user);
-  return user.balance;
+  const u = getUser(userId);
+  u.balance = Math.max(0, amount);
+  saveUser(userId, u);
+  return u.balance;
 }
 
-function getVault(userId) {
-  return getUser(userId).vault || 0;
-}
+function getVault(userId) { return getUser(userId).vault || 0; }
 
 function setVault(userId, amount) {
-  const user = getUser(userId);
-  user.vault = Math.max(0, amount);
-  saveUser(userId, user);
-  return user.vault;
+  const u = getUser(userId);
+  u.vault = Math.max(0, amount);
+  saveUser(userId, u);
+  return u.vault;
 }
 
-function generateDefaultSeed(userId) {
-  return require('crypto').createHash('sha256').update(userId + Date.now().toString()).digest('hex').slice(0, 16);
-}
-
-function getSeed(userId) {
-  return getUser(userId).seed;
-}
+function getSeed(userId) { return getUser(userId).seed; }
 
 function setSeed(userId, seed) {
-  const user = getUser(userId);
-  user.seed = seed;
-  user.nonce = 0;
-  saveUser(userId, user);
+  const u = getUser(userId);
+  u.seed = seed;
+  u.nonce = 0;
+  saveUser(userId, u);
 }
 
 function incrementNonce(userId) {
-  const user = getUser(userId);
-  user.nonce = (user.nonce || 0) + 1;
-  saveUser(userId, user);
-  return user.nonce;
+  const u = getUser(userId);
+  u.nonce = (u.nonce || 0) + 1;
+  saveUser(userId, u);
+  return u.nonce;
 }
 
 function recordGame(userId, won, amount) {
-  const user = getUser(userId);
-  user.gamesPlayed = (user.gamesPlayed || 0) + 1;
-  if (won) {
-    user.totalWon = (user.totalWon || 0) + amount;
-  } else {
-    user.totalLost = (user.totalLost || 0) + amount;
-  }
-  saveUser(userId, user);
+  const u = getUser(userId);
+  u.gamesPlayed = (u.gamesPlayed || 0) + 1;
+  if (won) u.totalWon = (u.totalWon || 0) + amount;
+  else u.totalLost = (u.totalLost || 0) + amount;
+  saveUser(userId, u);
 }
 
 module.exports = {
-  getUser,
-  saveUser,
-  addBalance,
-  removeBalance,
-  setBalance,
-  getVault,
-  setVault,
-  getSeed,
-  setSeed,
-  incrementNonce,
+  getUser, saveUser, loadDB,
+  getActivePool, isDemo, claimDemo,
+  spendBet, addWin,
+  addBalance, removeBalance, setBalance,
+  getVault, setVault,
+  getSeed, setSeed, incrementNonce,
   recordGame,
-  loadDB,
 };

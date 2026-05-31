@@ -1,5 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const { getUser, removeBalance, addBalance, recordGame } = require('../../utils/database');
+const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
+const { parseBet, calcPayout, tiePayout, rigged50Win, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
@@ -7,17 +8,14 @@ module.exports = {
   name: 'cf',
   aliases: ['coinflip'],
   description: 'Flip a coin — heads or tails',
-  usage: '.cf <bet> [h|t]',
-  async execute(message, args, client) {
-    const bet = parseInt(args[0]);
-    if (isNaN(bet) || bet <= 0) return message.reply({ embeds: [errorEmbed('Invalid Bet', '`Usage: .cf <bet> [h|t]`')] });
-
-    const user = getUser(message.author.id);
-    if (user.balance < bet) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `You only have **${user.balance.toLocaleString()}** ${config.currency}`)] });
+  usage: '.cf <bet|all|half> [h|t]',
+  async execute(message, args) {
+    const parsed = parseBet(message.author.id, args[0]);
+    if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
+    const { bet, isDemo } = parsed;
 
     let choice = args[1]?.toLowerCase();
 
-    // If no choice, show buttons
     if (!choice || !['h', 't', 'heads', 'tails'].includes(choice)) {
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('cf_heads').setLabel('🪙 Heads').setStyle(ButtonStyle.Primary),
@@ -25,7 +23,7 @@ module.exports = {
       );
       const embed = new EmbedBuilder()
         .setColor(config.colors.primary)
-        .setTitle('🪙 Coinflip')
+        .setTitle(`🪙 Coinflip${balLabel(isDemo)}`)
         .setDescription(`Bet: **${bet.toLocaleString()}** ${config.currency}\nChoose **Heads** or **Tails**!`)
         .setTimestamp();
       const reply = await message.reply({ embeds: [embed], components: [row] });
@@ -33,59 +31,57 @@ module.exports = {
       const collector = reply.createMessageComponentCollector({
         componentType: ComponentType.Button,
         filter: i => i.user.id === message.author.id,
-        time: 30000,
-        max: 1,
+        time: 30000, max: 1,
       });
-
       collector.on('collect', async i => {
         choice = i.customId === 'cf_heads' ? 'h' : 't';
         await i.deferUpdate();
-        await runFlip(message, reply, bet, choice);
+        await runFlip(message, reply, bet, choice, isDemo);
       });
-
-      collector.on('end', (_, reason) => {
-        if (reason === 'time') reply.edit({ components: [] }).catch(() => {});
-      });
+      collector.on('end', (_, r) => { if (r === 'time') reply.edit({ components: [] }).catch(() => {}); });
       return;
     }
 
     choice = choice[0];
-    const embed = new EmbedBuilder().setColor(config.colors.primary).setTitle('🪙 Coinflip').setTimestamp();
-    const reply = await message.reply({ embeds: [embed] });
-    await runFlip(message, reply, bet, choice);
+    const reply = await message.reply({ embeds: [new EmbedBuilder().setColor(config.colors.primary).setTitle(`🪙 Coinflip${balLabel(isDemo)}`).setTimestamp()] });
+    await runFlip(message, reply, bet, choice, isDemo);
   },
 };
 
-async function runFlip(message, reply, bet, choice) {
+async function runFlip(message, reply, bet, choice, isDemo) {
   const ANIM = ['🌀', '🪙', '💫', '🪙', '🌀'];
-  const embed = new EmbedBuilder().setColor(config.colors.primary).setTitle('🪙 Coinflip').setTimestamp();
-
+  const embed = new EmbedBuilder().setColor(config.colors.primary).setTitle(`🪙 Coinflip${balLabel(isDemo)}`).setTimestamp();
   for (const frame of ANIM) {
     embed.setDescription(`${frame} **Flipping...**`);
     await reply.edit({ embeds: [embed], components: [] }).catch(() => {});
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 350));
   }
 
-  const result = Math.random() < 0.5 ? 'h' : 't';
-  const won = choice === result;
+  // Rigged: demo=70% win, actual=30% win
+  const won = rigged50Win(isDemo);
+  const result = won ? choice : (choice === 'h' ? 't' : 'h');
   const resultLabel = result === 'h' ? '🪙 Heads' : '🟡 Tails';
   const choiceLabel = choice === 'h' ? '🪙 Heads' : '🟡 Tails';
 
-  if (won) addBalance(message.author.id, bet);
-  else removeBalance(message.author.id, bet);
-
-  recordGame(message.author.id, won, bet);
-  const newBal = getUser(message.author.id).balance;
-
-  embed
-    .setColor(won ? config.colors.success : config.colors.error)
-    .setDescription([
-      `It's **${resultLabel}**!`,
-      `Your pick: **${choiceLabel}**`,
-      '',
-      won ? `🎉 You won **${bet.toLocaleString()}** ${config.currency}!` : `😢 You lost **${bet.toLocaleString()}** ${config.currency}.`,
-      `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}`,
+  spendBet(message.author.id, bet, isDemo);
+  if (won) {
+    const payout = calcPayout(bet, 2);
+    addWin(message.author.id, payout, isDemo);
+    recordGame(message.author.id, true, payout - bet);
+    const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+    embed.setColor(config.colors.success).setDescription([
+      `It's **${resultLabel}**! Your pick: **${choiceLabel}**`,
+      `🎉 Won **${payout.toLocaleString()}** ${config.currency}!`,
+      `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
     ].join('\n'));
-
+  } else {
+    recordGame(message.author.id, false, bet);
+    const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+    embed.setColor(config.colors.error).setDescription([
+      `It's **${resultLabel}**! Your pick: **${choiceLabel}**`,
+      `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
+      `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
+    ].join('\n'));
+  }
   reply.edit({ embeds: [embed] }).catch(() => {});
 }

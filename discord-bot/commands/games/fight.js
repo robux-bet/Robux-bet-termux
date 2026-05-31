@@ -1,28 +1,21 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const { getUser, removeBalance, addBalance, recordGame } = require('../../utils/database');
+const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
+const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
-const MOVES = {
-  attack: { emoji: '⚔️', label: 'Attack', dmgRange: [15, 35], cost: 0 },
-  heavy:  { emoji: '🪓', label: 'Heavy', dmgRange: [25, 50], cost: 0, missChance: 0.35 },
-  heal:   { emoji: '💊', label: 'Heal', healRange: [15, 30], cost: 0 },
-};
-
-const BOT_NAMES = ['Shadow', 'Blaze', 'Vortex', 'Phantom', 'Titan'];
-const TAUNTS = ['Is that all you got?', "You fight like a poodle!", 'Try harder!', 'I\'m barely breaking a sweat!'];
+const BOT_NAMES = ['Shadow', 'Blaze', 'Phantom', 'Titan', 'Vortex'];
+const TAUNTS = ["Is that all?", "Try harder!", "I'm barely sweating!", "You call that an attack?"];
 
 module.exports = {
   name: 'fight',
-  description: 'Fight another user or the Bot — turn-based combat!',
-  usage: '.fight <bet> [@user]',
+  description: 'Turn-based fight vs another user or the Bot',
+  usage: '.fight <bet|all|half> [@user]',
   guildOnly: true,
   async execute(message, args, client) {
-    const bet = parseInt(args[0]);
-    if (isNaN(bet) || bet <= 0) return message.reply({ embeds: [errorEmbed('Invalid Bet', '`Usage: .fight <bet> [@user]`')] });
-
-    const user = getUser(message.author.id);
-    if (user.balance < bet) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `You only have **${user.balance.toLocaleString()}** ${config.currency}`)] });
+    const parsed = parseBet(message.author.id, args[0]);
+    if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
+    const { bet, isDemo } = parsed;
 
     const gameKey = `fight_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current fight!')] });
@@ -31,140 +24,162 @@ module.exports = {
     const vsBot = !opponent || opponent.bot || opponent.id === message.author.id;
 
     if (!vsBot) {
-      const oppUser = getUser(opponent.id);
-      if (oppUser.balance < bet) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `${opponent.username} doesn't have enough ${config.currency}.`)] });
-      removeBalance(opponent.id, bet);
+      const oppPool = require('../../utils/gameUtils').parseBet(opponent.id, String(bet));
+      if (oppPool.error || oppPool.bet < bet) {
+        return message.reply({ embeds: [errorEmbed('Insufficient Funds', `${opponent.username} doesn't have enough ${config.currency}.`)] });
+      }
     }
 
-    removeBalance(message.author.id, bet);
+    spendBet(message.author.id, bet, isDemo);
+    if (!vsBot) {
+      const oppIsDemo = require('../../utils/database').getActivePool(opponent.id).isDemo;
+      require('../../utils/database').spendBet(opponent.id, bet, oppIsDemo);
+    }
     client.activeGames.set(gameKey, { name: 'Fight', userId: message.author.id, bet });
 
     const botName = BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
     const p1 = { name: message.author.username, hp: 100, maxHp: 100, userId: message.author.id };
-    const p2 = vsBot ? { name: botName, hp: 100, maxHp: 100, isBot: true } : { name: opponent.username, hp: 100, maxHp: 100, userId: opponent.id };
+    const p2 = vsBot
+      ? { name: botName, hp: 100, maxHp: 100, isBot: true }
+      : { name: opponent.username, hp: 100, maxHp: 100, userId: opponent.id };
 
-    let turn = 1; // 1 = p1's turn, 2 = p2's turn
+    // In actual: bot goes first. In demo: player goes first.
+    let turn = isDemo ? 1 : 2;
     let gameOver = false;
     const log = [];
 
-    const hpBar = (current, max) => {
-      const pct = Math.max(0, current / max);
-      const filled = Math.floor(pct * 10);
-      return `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}] ${current}/${max}`;
+    const hpBar = (cur, max) => {
+      const f = Math.floor(Math.max(0, cur / max) * 10);
+      return `[${'█'.repeat(f)}${'░'.repeat(10 - f)}] ${Math.max(0, cur)}/${max}`;
     };
 
     const buildEmbed = () => new EmbedBuilder()
       .setColor(config.colors.primary)
-      .setTitle('⚔️ Fight!')
+      .setTitle(`⚔️ Fight!${balLabel(isDemo)}`)
       .addFields(
         { name: `❤️ ${p1.name}`, value: hpBar(p1.hp, p1.maxHp), inline: false },
         { name: `💜 ${p2.name}`, value: hpBar(p2.hp, p2.maxHp), inline: false },
-        { name: '📜 Battle Log', value: log.slice(-4).join('\n') || '— Fight Start! —', inline: false },
+        { name: '📜 Log', value: log.slice(-4).join('\n') || '— Fight Start! —', inline: false },
       )
       .setFooter({ text: turn === 1 ? `${p1.name}'s turn` : `${p2.name}'s turn` })
       .setTimestamp();
 
+    // Only attack and heal (no heavy)
     const moveRow = () => new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('fight_attack').setLabel('⚔️ Attack').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('fight_heavy').setLabel('🪓 Heavy').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('fight_heal').setLabel('💊 Heal').setStyle(ButtonStyle.Success),
     );
 
-    const reply = await message.reply({ embeds: [buildEmbed()], components: moveRow() ? [moveRow()] : [] });
+    // Miss chances: demo player = 5%, actual player = 50%
+    // Bot miss: demo = 55%, actual = 15%
+    const playerMissChance = isDemo ? 0.05 : 0.50;
+    const botMissChance = isDemo ? 0.55 : 0.15;
 
-    function applyMove(attacker, defender, moveKey) {
-      const move = MOVES[moveKey];
-      if (moveKey === 'heal') {
-        const heal = Math.floor(Math.random() * (move.healRange[1] - move.healRange[0]) + move.healRange[0]);
-        attacker.hp = Math.min(attacker.maxHp, attacker.hp + heal);
-        log.push(`💊 **${attacker.name}** heals **${heal}** HP!`);
-      } else {
-        if (move.missChance && Math.random() < move.missChance) {
-          log.push(`🌀 **${attacker.name}** missed!`);
-          return;
-        }
-        const dmg = Math.floor(Math.random() * (move.dmgRange[1] - move.dmgRange[0]) + move.dmgRange[0]);
-        defender.hp = Math.max(0, defender.hp - dmg);
-        log.push(`${move.emoji} **${attacker.name}** ${moveKey === 'heavy' ? 'heavy attacks' : 'attacks'} **${defender.name}** for **${dmg}** dmg!`);
+    function applyAttack(attacker, defender, isPlayerAttack) {
+      const missChance = isPlayerAttack ? playerMissChance : botMissChance;
+      if (Math.random() < missChance) {
+        log.push(`💨 **${attacker.name}** missed!`);
+        return;
       }
+      const dmg = Math.floor(Math.random() * 20 + 15);
+      defender.hp = Math.max(0, defender.hp - dmg);
+      log.push(`⚔️ **${attacker.name}** hits **${defender.name}** for **${dmg}** dmg!`);
     }
 
-    function botMove() {
-      // Bot strategy: heal if low, heavy if high HP, random otherwise
-      if (p2.hp < 30) return 'heal';
-      if (p1.hp > 50 && Math.random() < 0.4) return 'heavy';
-      return Math.random() < 0.7 ? 'attack' : 'heavy';
+    function applyHeal(healer) {
+      const heal = Math.floor(Math.random() * 15 + 15);
+      healer.hp = Math.min(healer.maxHp, healer.hp + heal);
+      log.push(`💊 **${healer.name}** heals **${heal}** HP!`);
     }
 
-    async function endGame(winner) {
-      gameOver = true;
-      client.activeGames.delete(gameKey);
+    async function endGame(winnerName) {
+      gameOver = true; client.activeGames.delete(gameKey);
       let desc, color;
-      if (winner === p1.name) {
-        addBalance(p1.userId, bet * 2);
-        recordGame(p1.userId, true, bet);
-        if (!vsBot) recordGame(p2.userId, false, bet);
-        desc = `🏆 **${p1.name} wins!** +**${bet.toLocaleString()}** ${config.currency}!`;
+      if (winnerName === p1.name) {
+        const payout = calcPayout(bet * 2, 1, false);
+        addWin(p1.userId, payout, isDemo);
+        recordGame(p1.userId, true, payout - bet);
+        if (!vsBot && p2.userId) recordGame(p2.userId, false, bet);
+        desc = `🏆 **${p1.name} wins!** +**${(payout - bet).toLocaleString()}** ${config.currency}!`;
         color = config.colors.success;
       } else {
         recordGame(p1.userId, false, bet);
-        if (!vsBot) { addBalance(p2.userId, bet * 2); recordGame(p2.userId, true, bet); }
-        desc = `💀 **${p2.name} wins!** ${vsBot ? 'Bot wins!' : ''} Lost **${bet.toLocaleString()}** ${config.currency}.`;
+        if (!vsBot && p2.userId) {
+          const oppIsDemo = require('../../utils/database').isDemo(p2.userId);
+          addWin(p2.userId, calcPayout(bet * 2, 1, false), oppIsDemo);
+          recordGame(p2.userId, true, bet);
+        }
+        desc = `💀 **${p2.name} wins!** Lost **${bet.toLocaleString()}** ${config.currency}.`;
         color = config.colors.error;
       }
-      const newBal = getUser(message.author.id).balance;
+      const newBal = isDemo ? getUser(p1.userId).demoBalance : getUser(p1.userId).balance;
       const embed = new EmbedBuilder().setColor(color).setTitle('⚔️ Fight Over!')
         .addFields(
           { name: `❤️ ${p1.name}`, value: hpBar(p1.hp, p1.maxHp), inline: false },
           { name: `💜 ${p2.name}`, value: hpBar(p2.hp, p2.maxHp), inline: false },
-          { name: '📜 Result', value: desc, inline: false },
         )
-        .setDescription(`💰 Balance: **${newBal.toLocaleString()}** ${config.currency}`)
+        .setDescription(`${desc}\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)
         .setTimestamp();
       reply.edit({ embeds: [embed], components: [] }).catch(() => {});
+    }
+
+    // If bot goes first (actual), do bot move immediately before showing buttons
+    const reply = await message.reply({ embeds: [buildEmbed()], components: vsBot && !isDemo ? [] : [moveRow()] });
+
+    async function doBotTurn() {
+      const action = p2.hp < 30 && Math.random() < 0.6 ? 'heal' : 'attack';
+      if (action === 'heal') applyHeal(p2);
+      else applyAttack(p2, p1, false);
+      if (Math.random() < 0.25) log.push(`💬 *${p2.name}: "${TAUNTS[Math.floor(Math.random() * TAUNTS.length)]}"*`);
+      if (p1.hp <= 0) { return endGame(p2.name); }
+      turn = 1;
+      await reply.edit({ embeds: [buildEmbed()], components: [moveRow()] }).catch(() => {});
+    }
+
+    // Actual: bot starts first
+    if (vsBot && !isDemo) {
+      await new Promise(r => setTimeout(r, 1000));
+      await doBotTurn();
+      if (gameOver) return;
     }
 
     const collector = reply.createMessageComponentCollector({
       componentType: ComponentType.Button,
       filter: i => {
         if (vsBot) return i.user.id === message.author.id && turn === 1;
-        return (i.user.id === message.author.id && turn === 1) || (i.user.id === opponent.id && turn === 2);
+        return (i.user.id === message.author.id && turn === 1) || (opponent && i.user.id === opponent.id && turn === 2);
       },
       time: 120000,
     });
 
     collector.on('collect', async i => {
       const moveKey = i.customId.replace('fight_', '');
-      const attacker = turn === 1 ? p1 : p2;
-      const defender = turn === 1 ? p2 : p1;
-
-      applyMove(attacker, defender, moveKey);
+      if (moveKey === 'attack') applyAttack(p1, p2, true);
+      else applyHeal(p1);
       await i.deferUpdate();
 
-      if (defender.hp <= 0) { collector.stop(); return endGame(attacker.name); }
+      if (p2.hp <= 0) { collector.stop(); return endGame(p1.name); }
+      turn = 2;
 
-      turn = turn === 1 ? 2 : 1;
-
-      if (vsBot && turn === 2) {
-        // Bot's turn
+      if (vsBot) {
         await reply.edit({ embeds: [buildEmbed()], components: [] }).catch(() => {});
-        await new Promise(r => setTimeout(r, 1000));
-        const bMove = botMove();
-        applyMove(p2, p1, bMove);
-        if (Math.random() < 0.3) log.push(`💬 *${p2.name}: "${TAUNTS[Math.floor(Math.random() * TAUNTS.length)]}"*`);
-        if (p1.hp <= 0) { return endGame(p2.name); }
-        turn = 1;
-        await reply.edit({ embeds: [buildEmbed()], components: [moveRow()] }).catch(() => {});
+        await new Promise(r => setTimeout(r, 900));
+        await doBotTurn();
+        if (gameOver) collector.stop();
       } else {
         await reply.edit({ embeds: [buildEmbed()], components: [moveRow()] }).catch(() => {});
+        // Flip turn back once opponent collects
       }
     });
 
     collector.on('end', (_, reason) => {
       client.activeGames.delete(gameKey);
       if (reason === 'time' && !gameOver) {
-        addBalance(p1.userId, bet);
-        if (!vsBot && p2.userId) addBalance(p2.userId, bet);
+        addWin(p1.userId, bet, isDemo);
+        if (!vsBot && p2.userId) {
+          const { isDemo: isDemoFn2 } = require('../../utils/database');
+          addWin(p2.userId, bet, isDemoFn2(p2.userId));
+        }
         reply.edit({ content: '⏰ Fight timed out. Bets returned.', components: [] }).catch(() => {});
       }
     });

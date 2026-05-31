@@ -1,37 +1,114 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const { getUser, saveUser, removeBalance, addBalance } = require('../../utils/database');
+const { getUser, saveUser } = require('../../utils/database');
 const { errorEmbed, successEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
+// All items are cosmetic/showoff — no actual game effect
 const MARKET_ITEMS = [
-  { id: 'lucky_charm',  name: 'Lucky Charm',  emoji: '🍀', price: 50,  desc: '+5% win chance for 5 games', uses: 5 },
-  { id: 'gold_coin',    name: 'Gold Coin',    emoji: '🪙', price: 100, desc: 'Sell for profit or use as currency', uses: 1 },
-  { id: 'shield',       name: 'Shield',       emoji: '🛡️', price: 75,  desc: 'Protects from one loss', uses: 1 },
-  { id: 'dice_boost',   name: 'Loaded Dice',  emoji: '🎲', price: 80,  desc: 'Slight boost on dice rolls', uses: 3 },
-  { id: 'vip_pass',     name: 'VIP Pass',     emoji: '⭐', price: 200, desc: 'Shows you\'re VIP (cosmetic)', uses: 1 },
-  { id: 'mystery_box',  name: 'Mystery Box',  emoji: '📦', price: 120, desc: 'Open for a random Robux reward', uses: 1 },
+  {
+    id: 'vip_badge',
+    name: 'VIP Badge',
+    emoji: '⭐',
+    price: 500,
+    rarity: 'Epic',
+    desc: 'Flex with a VIP tag in leaderboards and balance checks',
+    perks: ['VIP tag on .balance', 'Gold name in .games', 'Priority in tickets'],
+  },
+  {
+    id: 'diamond_crown',
+    name: 'Diamond Crown',
+    emoji: '👑',
+    price: 1000,
+    rarity: 'Legendary',
+    desc: 'The ultimate status symbol in the casino',
+    perks: ['Crown emoji on .balance', 'Listed as high roller', 'Royal title'],
+  },
+  {
+    id: 'casino_card',
+    name: 'Casino Card',
+    emoji: '🃏',
+    price: 200,
+    rarity: 'Rare',
+    desc: 'A sleek membership card proving you\'re a regular',
+    perks: ['Card on your profile', 'Gambler\'s badge', 'Shareable flex'],
+  },
+  {
+    id: 'golden_chip',
+    name: 'Golden Chip',
+    emoji: '🟡',
+    price: 350,
+    rarity: 'Epic',
+    desc: 'The gold chip: reserved for true high rollers',
+    perks: ['Gold chip display', 'High roller status', 'Rare collectible'],
+  },
+  {
+    id: 'mystery_box',
+    name: 'Mystery Box',
+    emoji: '📦',
+    price: 150,
+    rarity: 'Common',
+    desc: 'Open for a random Robux surprise (50–300)',
+    perks: ['Random Robux reward on open'],
+    openable: true,
+  },
+  {
+    id: 'neon_trophy',
+    name: 'Neon Trophy',
+    emoji: '🏆',
+    price: 750,
+    rarity: 'Legendary',
+    desc: 'A flashy neon trophy — the envy of the casino floor',
+    perks: ['Trophy on your balance', 'Champion status', 'Neon glow flex'],
+  },
 ];
+
+const RARITY_COLORS = { Common: '⬜', Rare: '🟦', Epic: '🟪', Legendary: '🟨' };
 
 module.exports = {
   name: 'market',
   aliases: ['shop', 'store'],
-  description: 'Buy and sell virtual items with your Robux',
-  usage: '.market [buy <item>|sell <item>|inventory]',
+  description: 'Buy cosmetic items to flex with your Robux',
+  usage: '.market [buy <id> | sell <id> | inventory | info <id>]',
   async execute(message, args) {
     const sub = args[0]?.toLowerCase() || 'browse';
 
     if (sub === 'browse' || sub === 'list') {
       const embed = new EmbedBuilder()
         .setColor(config.colors.gold)
-        .setTitle('🏪 Market')
-        .setDescription(`Browse and buy items with your ${config.currency}!\nUse \`.market buy <item_id>\` to purchase.\nUse \`.market inventory\` to view your items.`)
-        .addFields(
-          MARKET_ITEMS.map(item => ({
-            name: `${item.emoji} ${item.name} — **${item.price}** ${config.currency}`,
-            value: `ID: \`${item.id}\` | ${item.desc}`,
-            inline: false,
-          }))
-        )
+        .setTitle('🏪 Casino Market')
+        .setDescription([
+          `Spend your ${config.currency} on exclusive cosmetics and flexes!`,
+          `All items are **cosmetic only** — pure status and style.`,
+          ``,
+          `\`\`\``,
+          MARKET_ITEMS.map(i =>
+            `${i.emoji} ${i.name.padEnd(18)} ${RARITY_COLORS[i.rarity]} ${i.rarity.padEnd(10)} ${i.price.toLocaleString()} Robux`
+          ).join('\n'),
+          `\`\`\``,
+          `Use \`.market info <id>\` to view item perks`,
+          `Use \`.market buy <id>\` to purchase`,
+          `Use \`.market inventory\` to view your collection`,
+        ].join('\n'))
+        .setTimestamp();
+      return message.reply({ embeds: [embed] });
+    }
+
+    if (sub === 'info') {
+      const itemId = args[1]?.toLowerCase();
+      const item = MARKET_ITEMS.find(i => i.id === itemId);
+      if (!item) return message.reply({ embeds: [errorEmbed('Not Found', `Unknown item ID \`${itemId}\`. Use \`.market\` to browse.`)] });
+      const embed = new EmbedBuilder()
+        .setColor(config.colors.gold)
+        .setTitle(`${item.emoji} ${item.name}`)
+        .setDescription([
+          `${RARITY_COLORS[item.rarity]} **${item.rarity}** · **${item.price.toLocaleString()}** ${config.currency}`,
+          '',
+          item.desc,
+          '',
+          '**Perks:**',
+          item.perks.map(p => `• ${p}`).join('\n'),
+        ].join('\n'))
+        .setFooter({ text: `ID: ${item.id} · .market buy ${item.id}` })
         .setTimestamp();
       return message.reply({ embeds: [embed] });
     }
@@ -40,70 +117,86 @@ module.exports = {
       const user = getUser(message.author.id);
       const inv = user.inventory || {};
       if (Object.keys(inv).length === 0) {
-        return message.reply({ embeds: [errorEmbed('Empty Inventory', 'You have no items. Use `.market` to browse!')] });
+        return message.reply({ embeds: [errorEmbed('Empty Inventory', 'You have no items.\nBrowse with `.market` and buy with `.market buy <id>`!')] });
       }
       const lines = Object.entries(inv).map(([id, qty]) => {
         const item = MARKET_ITEMS.find(i => i.id === id);
-        return item ? `${item.emoji} **${item.name}** × ${qty}` : `\`${id}\` × ${qty}`;
-      });
+        if (!item) return null;
+        return `${item.emoji} **${item.name}** × ${qty}  —  ${RARITY_COLORS[item.rarity]} ${item.rarity}`;
+      }).filter(Boolean);
       return message.reply({
-        embeds: [new EmbedBuilder().setColor(config.colors.primary).setTitle('🎒 Your Inventory').setDescription(lines.join('\n')).setTimestamp()],
+        embeds: [new EmbedBuilder().setColor(config.colors.gold).setTitle(`🎒 ${message.author.username}'s Collection`).setDescription(lines.join('\n') || 'No items.').setTimestamp()],
       });
     }
 
     if (sub === 'buy') {
       const itemId = args[1]?.toLowerCase();
       const item = MARKET_ITEMS.find(i => i.id === itemId);
-      if (!item) return message.reply({ embeds: [errorEmbed('Item Not Found', `Invalid item ID. Use \`.market\` to browse.`)] });
+      if (!item) return message.reply({ embeds: [errorEmbed('Not Found', `Unknown item \`${itemId}\`. Use \`.market\` to browse.`)] });
 
       const user = getUser(message.author.id);
-      if (user.balance < item.price) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `You need **${item.price}** ${config.currency}. You have **${user.balance.toLocaleString()}**.`)] });
+      // Use actual balance for purchases
+      if (user.balance < item.price) {
+        return message.reply({ embeds: [errorEmbed('Insufficient Actual Balance', [
+          `You need **${item.price.toLocaleString()}** ${config.currency} (actual balance).`,
+          `You have: **${user.balance.toLocaleString()}**`,
+        ].join('\n'))] });
+      }
 
-      // Special: mystery box opens immediately
-      if (itemId === 'mystery_box') {
-        removeBalance(message.author.id, item.price);
-        const reward = Math.floor(Math.random() * 200) + 10;
-        addBalance(message.author.id, reward);
-        const newBal = getUser(message.author.id).balance;
+      // Mystery box: immediate Robux
+      if (item.openable) {
+        user.balance -= item.price;
+        const reward = Math.floor(Math.random() * 251) + 50; // 50-300
+        user.balance += reward;
+        saveUser(message.author.id, user);
         return message.reply({
           embeds: [new EmbedBuilder().setColor(config.colors.gold).setTitle('📦 Mystery Box Opened!')
-            .setDescription([`You opened the mystery box and found **${reward}** ${config.currency}!`, `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}`].join('\n')).setTimestamp()],
+            .setDescription([
+              `You opened the **Mystery Box** and found **${reward}** ${config.currency}!`,
+              `Net ${reward > item.price ? `+${reward - item.price}` : `${reward - item.price}`} ${config.currency}`,
+              `💰 Balance: **${user.balance.toLocaleString()}** ${config.currency}`,
+            ].join('\n')).setTimestamp()],
         });
       }
 
-      removeBalance(message.author.id, item.price);
-      const user2 = getUser(message.author.id);
-      user2.inventory = user2.inventory || {};
-      user2.inventory[itemId] = (user2.inventory[itemId] || 0) + 1;
-      saveUser(message.author.id, user2);
+      user.balance -= item.price;
+      user.inventory = user.inventory || {};
+      user.inventory[itemId] = (user.inventory[itemId] || 0) + 1;
+      saveUser(message.author.id, user);
 
       return message.reply({
-        embeds: [successEmbed('Item Purchased', `You bought ${item.emoji} **${item.name}** for **${item.price}** ${config.currency}!\n\n${item.desc}`)],
+        embeds: [new EmbedBuilder().setColor(config.colors.success).setTitle('✅ Purchase Complete!')
+          .setDescription([
+            `You bought ${item.emoji} **${item.name}** for **${item.price.toLocaleString()}** ${config.currency}!`,
+            '',
+            '**Your Perks:**',
+            item.perks.map(p => `• ${p}`).join('\n'),
+            '',
+            `💰 Remaining balance: **${user.balance.toLocaleString()}** ${config.currency}`,
+          ].join('\n')).setTimestamp()],
       });
     }
 
     if (sub === 'sell') {
       const itemId = args[1]?.toLowerCase();
       const item = MARKET_ITEMS.find(i => i.id === itemId);
-      if (!item) return message.reply({ embeds: [errorEmbed('Item Not Found', 'Invalid item ID.')] });
-
+      if (!item) return message.reply({ embeds: [errorEmbed('Not Found', `Unknown item \`${itemId}\`.`)] });
       const user = getUser(message.author.id);
       const inv = user.inventory || {};
-      if (!inv[itemId] || inv[itemId] <= 0) return message.reply({ embeds: [errorEmbed('Not Owned', `You don't own any **${item.name}**.`)] });
+      if (!inv[itemId] || inv[itemId] <= 0) return message.reply({ embeds: [errorEmbed('Not Owned', `You don't own **${item.name}**.`)] });
 
-      const sellPrice = Math.floor(item.price * 0.6);
+      const sellPrice = Math.floor(item.price * 0.5);
       inv[itemId]--;
       if (inv[itemId] === 0) delete inv[itemId];
       user.inventory = inv;
+      user.balance += sellPrice;
       saveUser(message.author.id, user);
-      addBalance(message.author.id, sellPrice);
-      const newBal = getUser(message.author.id).balance;
 
       return message.reply({
-        embeds: [successEmbed('Item Sold', `Sold ${item.emoji} **${item.name}** for **${sellPrice}** ${config.currency} (60% of price).\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}`)],
+        embeds: [successEmbed('Item Sold', `Sold ${item.emoji} **${item.name}** for **${sellPrice.toLocaleString()}** ${config.currency} (50% resale).\n💰 Balance: **${user.balance.toLocaleString()}** ${config.currency}`)],
       });
     }
 
-    return message.reply({ embeds: [errorEmbed('Unknown Subcommand', 'Use: `.market` `.market buy <id>` `.market sell <id>` `.market inventory`')] });
+    message.reply({ embeds: [errorEmbed('Unknown Subcommand', 'Use: `.market` `.market buy <id>` `.market sell <id>` `.market info <id>` `.market inventory`')] });
   },
 };

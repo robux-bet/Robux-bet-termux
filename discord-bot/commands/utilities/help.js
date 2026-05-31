@@ -5,12 +5,12 @@ const categories = {
   admin: {
     emoji: '🛡️',
     label: 'Admin',
-    description: 'Server administration commands',
+    description: 'Server administration commands (requires Admin role)',
     commands: [
-      { name: '.add @user <amount>', desc: 'Add Robux to a user' },
-      { name: '.adminvault @user <action> <amount>', desc: 'Manage vault balance' },
+      { name: '.add @user <amount>', desc: 'Add actual Robux to a user' },
+      { name: '.adminvault @user <set|add|remove|view> <amt>', desc: 'Manage vault balance' },
       { name: '.remove @user <amount>', desc: 'Remove Robux from a user' },
-      { name: '.setbalance @user <amount>', desc: "Set user's balance" },
+      { name: '.setbalance @user <amount>', desc: "Set user's actual balance" },
     ],
   },
   utilities: {
@@ -18,11 +18,12 @@ const categories = {
     label: 'Utilities',
     description: 'General utility commands',
     commands: [
-      { name: '.games', desc: 'Show all active games' },
-      { name: '.help', desc: 'Shows this help menu' },
+      { name: '.guide', desc: '📖 New user guide — start here!' },
+      { name: '.help [category]', desc: 'Shows this help menu' },
       { name: '.ping', desc: 'Show latency and uptime' },
+      { name: '.games', desc: 'See all active games' },
       { name: '.seed [newseed]', desc: 'View/change provably fair seed' },
-      { name: '.room [create|add|remove|close]', desc: 'Manage private threads' },
+      { name: '.room create|add|remove|close', desc: 'Private thread management' },
     ],
   },
   balance: {
@@ -30,82 +31,70 @@ const categories = {
     label: 'Balance',
     description: 'Economy and balance commands',
     commands: [
-      { name: '.balance / .bal [@user]', desc: 'Check balance' },
-      { name: '.daily', desc: 'Spin wheel for 1–10 Robux' },
-      { name: '.deposit / .depo <amount>', desc: 'Open a deposit ticket' },
-      { name: '.withdraw <amount>', desc: 'Open a withdraw ticket' },
-      { name: '.tip @user <amount>', desc: 'Tip another user' },
+      { name: '.demo', desc: '🎁 Claim 1,000 free demo Robux (once)' },
+      { name: '.balance / .bal [@user]', desc: 'Check wallet, demo & vault' },
+      { name: '.daily', desc: 'Spin wheel for 1–10 free Robux (24h)' },
+      { name: '.deposit <amount>', desc: 'Open a deposit ticket channel' },
+      { name: '.withdraw <amount>', desc: 'Open a withdrawal ticket channel' },
+      { name: '.tip @user <amount>', desc: 'Send Robux to another user' },
     ],
   },
   games: {
     emoji: '🎮',
     label: 'Games',
-    description: 'Gambling and game commands',
+    description: 'All gambling and game commands — use `all` or `half` for bet amounts!',
     commands: [
-      { name: '.baccarat <bet>', desc: 'Baccarat card game' },
-      { name: '.balloon <bet>', desc: 'Pump the balloon without popping' },
+      { name: '.baccarat <bet> [p|b|t]', desc: 'Player / Banker / Tie card game' },
+      { name: '.balloon <bet>', desc: 'Pump balloon, cash out before pop' },
       { name: '.bj <bet>', desc: 'Blackjack vs dealer' },
-      { name: '.bjdice <bet>', desc: 'Dice blackjack variant' },
-      { name: '.cards <bet>', desc: 'Guess the card color' },
-      { name: '.casebattles <bet>', desc: 'Open cases and battle' },
-      { name: '.slots <bet>', desc: 'Spin the slot machine' },
-      { name: '.cf <bet> [h|t]', desc: 'Coinflip vs house or player' },
-      { name: '.connect <bet> [@user]', desc: 'Connect 4 vs AI or player' },
-      { name: '.crash <bet>', desc: 'Crash multiplier game' },
-      { name: '.dice <bet> <target>', desc: 'Roll dice, pick target' },
-      { name: '.fight <bet> [@user]', desc: 'Fight vs another user' },
-      { name: '.ghosts <bet>', desc: 'Catch good ghosts, avoid bad' },
-      { name: '.hilo <bet>', desc: 'Higher or lower card game' },
-      { name: '.limbo <bet> <multiplier>', desc: 'Bet on a multiplier' },
-      { name: '.market', desc: 'Virtual item marketplace' },
-      { name: '.mines <bet> <mines>', desc: 'Minesweeper gambling' },
-      { name: '.plinko <bet> <rows>', desc: 'Plinko board drop' },
-      { name: '.rps <bet> [r|p|s] [@user]', desc: 'Rock Paper Scissors' },
-      { name: '.roulette <bet> <color/num>', desc: 'Roulette wheel' },
-      { name: '.ttt <bet> [@user]', desc: 'Tic Tac Toe vs AI or player' },
+      { name: '.cards <bet>', desc: 'Guess card color or suit' },
+      { name: '.casebattles <bet> @user', desc: 'PvP case opening battle' },
+      { name: '.cf <bet> [h|t]', desc: 'Coinflip (heads or tails)' },
+      { name: '.crash <bet>', desc: 'Cash out before it crashes!' },
+      { name: '.dice <bet> <1-6|high|low>', desc: 'Dice roll' },
+      { name: '.fight <bet> [@user]', desc: 'Turn-based combat' },
+      { name: '.hilo <bet>', desc: 'Higher or Lower card game' },
+      { name: '.market [buy|sell|inventory|info]', desc: 'Casino cosmetics shop' },
+      { name: '.mines <bet> [mines]', desc: 'Minesweeper with cash-out' },
+      { name: '.plinko <bet> [8|12|16]', desc: 'Plinko board drop' },
+      { name: '.roulette <bet> <target>', desc: 'Roulette wheel' },
+      { name: '.rps <bet> @user', desc: 'Rock Paper Scissors (PvP only)' },
+      { name: '.ttt <bet> @user', desc: 'Tic Tac Toe (PvP only)' },
     ],
   },
 };
 
 function buildEmbed(catKey) {
   const cat = categories[catKey];
-  const embed = new EmbedBuilder()
+  return new EmbedBuilder()
     .setColor(config.colors.primary)
     .setTitle(`${cat.emoji} ${cat.label} Commands`)
     .setDescription(cat.description)
-    .addFields(
-      cat.commands.map(c => ({ name: `\`${c.name}\``, value: c.desc, inline: false }))
-    )
-    .setFooter({ text: `${config.prefix}help • Virtual Robux Casino` })
+    .addFields(cat.commands.map(c => ({ name: `\`${c.name}\``, value: c.desc, inline: false })))
+    .setFooter({ text: `${config.prefix}help • ${config.prefix}guide for new users` })
     .setTimestamp();
-  return embed;
 }
 
 function buildButtons(activeKey) {
-  const row = new ActionRowBuilder();
-  for (const [key, cat] of Object.entries(categories)) {
-    row.addComponents(
+  return new ActionRowBuilder().addComponents(
+    ...Object.entries(categories).map(([key, cat]) =>
       new ButtonBuilder()
         .setCustomId(`help_${key}`)
         .setLabel(`${cat.emoji} ${cat.label}`)
         .setStyle(activeKey === key ? ButtonStyle.Primary : ButtonStyle.Secondary)
-    );
-  }
-  return row;
+    )
+  );
 }
 
 module.exports = {
   name: 'help',
-  description: 'Show all available commands',
-  usage: '.help [category]',
+  description: 'Show all commands by category',
+  usage: '.help [admin|utilities|balance|games]',
   async execute(message, args) {
-    let currentCat = args[0]?.toLowerCase();
-    if (!categories[currentCat]) currentCat = 'utilities';
+    let current = args[0]?.toLowerCase();
+    if (!categories[current]) current = 'utilities';
 
-    const embed = buildEmbed(currentCat);
-    const row = buildButtons(currentCat);
-
-    const reply = await message.reply({ embeds: [embed], components: [row] });
+    const reply = await message.reply({ embeds: [buildEmbed(current)], components: [buildButtons(current)] });
 
     const collector = reply.createMessageComponentCollector({
       componentType: ComponentType.Button,
@@ -114,13 +103,10 @@ module.exports = {
     });
 
     collector.on('collect', async i => {
-      const catKey = i.customId.replace('help_', '');
-      currentCat = catKey;
-      await i.update({ embeds: [buildEmbed(catKey)], components: [buildButtons(catKey)] });
+      current = i.customId.replace('help_', '');
+      await i.update({ embeds: [buildEmbed(current)], components: [buildButtons(current)] });
     });
 
-    collector.on('end', () => {
-      reply.edit({ components: [] }).catch(() => {});
-    });
+    collector.on('end', () => reply.edit({ components: [] }).catch(() => {}));
   },
 };

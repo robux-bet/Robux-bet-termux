@@ -1,5 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const { getUser, removeBalance, addBalance, recordGame } = require('../../utils/database');
+const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
+const { parseBet, calcPayout, tiePayout, rigged50Win, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
@@ -18,122 +19,110 @@ function cardVal(r) {
   return parseInt(r);
 }
 
-function handVal(hand) {
-  return hand.reduce((s, c) => s + cardVal(c.r), 0) % 10;
-}
-
-function handStr(hand) {
-  return hand.map(c => `${c.r}${c.s}`).join(' ');
-}
+function handVal(hand) { return hand.reduce((s, c) => s + cardVal(c.r), 0) % 10; }
+function handStr(hand) { return hand.map(c => `${c.r}${c.s}`).join(' '); }
 
 module.exports = {
   name: 'baccarat',
   aliases: ['bac'],
   description: 'Baccarat — bet on Player, Banker, or Tie',
-  usage: '.baccarat <bet> [p|b|t]',
+  usage: '.baccarat <bet|all|half> [p|b|t]',
   async execute(message, args) {
-    const bet = parseInt(args[0]);
-    if (isNaN(bet) || bet <= 0) return message.reply({ embeds: [errorEmbed('Invalid Bet', '`Usage: .baccarat <bet> [p|b|t]`\n`p` = Player · `b` = Banker · `t` = Tie')] });
-
-    const user = getUser(message.author.id);
-    if (user.balance < bet) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `You only have **${user.balance.toLocaleString()}** ${config.currency}`)] });
+    const parsed = parseBet(message.author.id, args[0]);
+    if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
+    const { bet, isDemo } = parsed;
 
     let betOn = ['p','b','t'].includes(args[1]) ? args[1] : null;
 
     if (!betOn) {
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('bac_p').setLabel('👤 Player (2x)').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('bac_b').setLabel('🏦 Banker (1.95x)').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('bac_t').setLabel('🤝 Tie (9x)').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('bac_b').setLabel('🏦 Banker (2x)').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('bac_t').setLabel('🤝 Tie (8x)').setStyle(ButtonStyle.Success),
       );
-      const embed = new EmbedBuilder().setColor(config.colors.primary).setTitle('🃏 Baccarat').setDescription(`Bet: **${bet.toLocaleString()}** ${config.currency}\nChoose your bet:`).setTimestamp();
+      const embed = new EmbedBuilder().setColor(config.colors.primary)
+        .setTitle(`🃏 Baccarat${balLabel(isDemo)}`).setDescription(`Bet: **${bet.toLocaleString()}** ${config.currency}\nChoose your bet:`).setTimestamp();
       const reply = await message.reply({ embeds: [embed], components: [row] });
-
       const collector = reply.createMessageComponentCollector({
         componentType: ComponentType.Button, filter: i => i.user.id === message.author.id, time: 30000, max: 1,
       });
       collector.on('collect', async i => {
         betOn = i.customId.replace('bac_', '');
         await i.deferUpdate();
-        await runBaccarat(message, reply, bet, betOn);
+        await runBaccarat(message, reply, bet, betOn, isDemo);
       });
-      collector.on('end', (_, reason) => { if (reason === 'time') reply.edit({ components: [] }).catch(() => {}); });
+      collector.on('end', (_, r) => { if (r === 'time') reply.edit({ components: [] }).catch(() => {}); });
       return;
     }
 
-    const reply = await message.reply({ embeds: [new EmbedBuilder().setColor(config.colors.primary).setTitle('🃏 Baccarat').setTimestamp()] });
-    await runBaccarat(message, reply, bet, betOn);
+    const reply = await message.reply({ embeds: [new EmbedBuilder().setColor(config.colors.primary).setTitle(`🃏 Baccarat${balLabel(isDemo)}`).setTimestamp()] });
+    await runBaccarat(message, reply, bet, betOn, isDemo);
   },
 };
 
-async function runBaccarat(message, reply, bet, betOn) {
-  const { getUser, removeBalance, addBalance, recordGame } = require('../../utils/database');
-  const config = require('../../config');
-
-  removeBalance(message.author.id, bet);
+async function runBaccarat(message, reply, bet, betOn, isDemo) {
+  spendBet(message.author.id, bet, isDemo);
 
   const deck = newDeck();
   const player = [deck.pop(), deck.pop()];
   const banker = [deck.pop(), deck.pop()];
-
   let pVal = handVal(player), bVal = handVal(banker);
 
-  // Natural win check (8 or 9)
   const natural = pVal >= 8 || bVal >= 8;
-
-  // Player draw rule
   if (!natural && pVal <= 5) {
-    const draw = deck.pop();
-    player.push(draw);
-    pVal = handVal(player);
-
-    // Banker draw rule
+    const draw = deck.pop(); player.push(draw); pVal = handVal(player);
     const pThird = cardVal(draw.r);
     if (bVal <= 2 || (bVal === 3 && pThird !== 8) || (bVal === 4 && [2,3,4,5,6,7].includes(pThird)) ||
         (bVal === 5 && [4,5,6,7].includes(pThird)) || (bVal === 6 && [6,7].includes(pThird))) {
-      banker.push(deck.pop());
-      bVal = handVal(banker);
+      banker.push(deck.pop()); bVal = handVal(banker);
     }
   } else if (!natural && bVal <= 5) {
-    banker.push(deck.pop());
-    bVal = handVal(banker);
+    banker.push(deck.pop()); bVal = handVal(banker);
   }
 
-  let result, winnings = 0;
-  if (pVal > bVal) result = 'p';
-  else if (bVal > pVal) result = 'b';
-  else result = 't';
+  // Rigged: override result for p/b bets using 70/30 logic
+  let trueResult;
+  if (betOn === 't') {
+    // Tie bet: natural odds
+    trueResult = pVal > bVal ? 'p' : bVal > pVal ? 'b' : 't';
+  } else {
+    // Rig: demo 70% win, actual 30% win
+    const playerWins = rigged50Win(isDemo);
+    trueResult = playerWins ? betOn : (betOn === 'p' ? 'b' : 'p');
+  }
 
   const betLabels = { p: '👤 Player', b: '🏦 Banker', t: '🤝 Tie' };
-  let won = false;
+  let won = betOn === trueResult;
+  let winnings = 0;
 
-  if (betOn === result) {
-    won = true;
-    const mult = betOn === 't' ? 9 : betOn === 'b' ? 1.95 : 2;
-    winnings = Math.floor(bet * mult);
-    addBalance(message.author.id, winnings);
-  } else if (result === 't' && betOn !== 't') {
-    // Tie pushes non-tie bets
-    addBalance(message.author.id, bet);
+  spendBet; // already spent above
+  if (won) {
+    const mult = betOn === 't' ? 8 : 2;
+    winnings = calcPayout(bet, mult);
+    addWin(message.author.id, winnings, isDemo);
+  } else if (trueResult === 't' && betOn !== 't') {
+    // Tie pushes non-tie bets, but house takes 4%
+    const push = tiePayout(bet);
+    addWin(message.author.id, push, isDemo);
+    winnings = push;
   }
 
   recordGame(message.author.id, won, won ? winnings - bet : bet);
-  const newBal = getUser(message.author.id).balance;
+  const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
 
   const embed = new EmbedBuilder()
-    .setColor(won ? config.colors.success : result === 't' && betOn !== 't' ? config.colors.warning : config.colors.error)
-    .setTitle('🃏 Baccarat Result')
+    .setColor(won ? config.colors.success : trueResult === 't' && betOn !== 't' ? config.colors.warning : config.colors.error)
+    .setTitle(`🃏 Baccarat Result${balLabel(isDemo)}`)
     .addFields(
-      { name: `👤 Player (${pVal})`, value: handVal === 8 || pVal === 9 ? `${handStr(player)} 🌟 Natural!` : handStr(player), inline: true },
-      { name: `🏦 Banker (${bVal})`, value: bVal === 8 || bVal === 9 ? `${handStr(banker)} 🌟 Natural!` : handStr(banker), inline: true },
+      { name: `👤 Player (${pVal})`, value: handStr(player), inline: true },
+      { name: `🏦 Banker (${bVal})`, value: handStr(banker), inline: true },
     )
     .setDescription([
-      `**Winner: ${betLabels[result]}** | Your bet: **${betLabels[betOn]}**`,
-      '',
+      `**Winner: ${betLabels[trueResult]}** | Your bet: **${betLabels[betOn]}**`,
       won ? `🎉 Won **${winnings.toLocaleString()}** ${config.currency}!` :
-        result === 't' && betOn !== 't' ? `🤝 Tie — Bet returned.` :
+        trueResult === 't' && betOn !== 't' ? `🤝 Tie push — got back **${winnings.toLocaleString()}** ${config.currency}.` :
         `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
-      `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}`,
+      `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
     ].join('\n'))
     .setTimestamp();
 

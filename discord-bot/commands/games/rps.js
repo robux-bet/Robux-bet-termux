@@ -1,165 +1,141 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const { getUser, removeBalance, addBalance, recordGame } = require('../../utils/database');
+const { spendBet, addWin, getUser, recordGame, getActivePool, isDemo: isDemoFn } = require('../../utils/database');
+const { parseBet, tiePayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
-const CHOICES = { r: { label: '✊ Rock', beats: 's' }, p: { label: '🖐 Paper', beats: 'r' }, s: { label: '✌️ Scissors', beats: 'p' } };
-// AI uses weighted strategy — biased against common human patterns
-const AI_WEIGHTS = { r: 34, p: 33, s: 33 };
-
-function aiChoice() {
-  const total = Object.values(AI_WEIGHTS).reduce((a, b) => a + b, 0);
-  let r = Math.random() * total;
-  for (const [k, w] of Object.entries(AI_WEIGHTS)) {
-    r -= w;
-    if (r <= 0) return k;
-  }
-  return 'p';
-}
-
-function determineWinner(p, ai) {
-  if (p === ai) return 'draw';
-  if (CHOICES[p].beats === ai) return 'player';
-  return 'ai';
-}
+const CHOICES = { r: '✊ Rock', p: '🖐 Paper', s: '✌️ Scissors' };
+const BEATS = { r: 's', p: 'r', s: 'p' };
 
 module.exports = {
   name: 'rps',
   aliases: ['rockpaperscissors'],
-  description: 'Rock Paper Scissors vs AI or another player',
-  usage: '.rps <bet> [r|p|s] [@user]',
+  description: 'Rock Paper Scissors — PvP only!',
+  usage: '.rps <bet|all|half> @user',
   guildOnly: true,
   async execute(message, args, client) {
-    const bet = parseInt(args[0]);
-    if (isNaN(bet) || bet <= 0) return message.reply({ embeds: [errorEmbed('Invalid Bet', '`Usage: .rps <bet> [r|p|s] [@user]`')] });
-
-    const user = getUser(message.author.id);
-    if (user.balance < bet) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `You only have **${user.balance.toLocaleString()}** ${config.currency}`)] });
+    const parsed = parseBet(message.author.id, args[0]);
+    if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
+    const { bet, isDemo } = parsed;
 
     const opponent = message.mentions.users.first();
-    const vsPlayer = opponent && !opponent.bot && opponent.id !== message.author.id;
+    if (!opponent || opponent.bot || opponent.id === message.author.id) {
+      return message.reply({ embeds: [errorEmbed('PvP Only', 'Rock Paper Scissors can only be played against another user!\n`Usage: .rps <bet> @user`')] });
+    }
 
-    if (vsPlayer) {
-      // Multiplayer RPS
-      const oppData = getUser(opponent.id);
-      if (oppData.balance < bet) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `${opponent.username} doesn't have enough.`)] });
+    const oppPool = getActivePool(opponent.id);
+    if (oppPool.amount < bet) {
+      return message.reply({ embeds: [errorEmbed('Insufficient Funds', `${opponent.username} doesn't have enough ${config.currency}.`)] });
+    }
 
-      const embed = new EmbedBuilder().setColor(config.colors.primary).setTitle('✊ Rock Paper Scissors').setDescription(`${message.author} challenged ${opponent} to RPS!\nBet: **${bet.toLocaleString()}** ${config.currency} each\n\nBoth players, DM me your choice or click the button below!`).setTimestamp();
-      const row = new ActionRowBuilder().addComponents(
+    const oppIsDemo = oppPool.isDemo;
+
+    // Challenge embed
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('rps_accept').setLabel('✅ Accept').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('rps_decline').setLabel('❌ Decline').setStyle(ButtonStyle.Danger),
+    );
+    const challengeEmbed = new EmbedBuilder()
+      .setColor(config.colors.primary)
+      .setTitle('✊ Rock Paper Scissors Challenge')
+      .setDescription([
+        `${message.author} challenged ${opponent} to **RPS**!`,
+        `Bet: **${bet.toLocaleString()}** ${config.currency} each`,
+        `Pot: **${(bet * 2).toLocaleString()}** ${config.currency}`,
+        ``,
+        `${opponent.username}, click **Accept** to play!`,
+      ].join('\n'))
+      .setTimestamp();
+    const challengeMsg = await message.reply({ embeds: [challengeEmbed], components: [row] });
+
+    const acceptCollector = challengeMsg.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      filter: i => i.user.id === opponent.id,
+      time: 30000, max: 1,
+    });
+
+    acceptCollector.on('collect', async i => {
+      if (i.customId === 'rps_decline') {
+        await i.update({ embeds: [new EmbedBuilder().setColor(config.colors.error).setTitle('RPS Declined').setDescription(`${opponent.username} declined the challenge.`).setTimestamp()], components: [] });
+        return;
+      }
+      await i.deferUpdate();
+
+      // Both players pick
+      spendBet(message.author.id, bet, isDemo);
+      spendBet(opponent.id, bet, oppIsDemo);
+
+      const pickRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('rps_r').setLabel('✊ Rock').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('rps_p').setLabel('🖐 Paper').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('rps_s').setLabel('✌️ Scissors').setStyle(ButtonStyle.Danger),
       );
-      const reply = await message.reply({ embeds: [embed], components: [row] });
-      const picks = {};
+      const pickEmbed = new EmbedBuilder()
+        .setColor(config.colors.primary)
+        .setTitle('✊ RPS — Make Your Pick!')
+        .setDescription(`Both players click a button! Your pick is private.\n⏰ 25 seconds to choose.`)
+        .setTimestamp();
+      await challengeMsg.edit({ embeds: [pickEmbed], components: [pickRow] });
 
-      const collector = reply.createMessageComponentCollector({
+      const picks = {};
+      const pickCollector = challengeMsg.createMessageComponentCollector({
         componentType: ComponentType.Button,
         filter: i => [message.author.id, opponent.id].includes(i.user.id) && !picks[i.user.id],
-        time: 60000,
+        time: 25000,
       });
 
-      collector.on('collect', async i => {
+      pickCollector.on('collect', async i => {
         picks[i.user.id] = i.customId.replace('rps_', '');
-        await i.reply({ content: `✅ You picked **${CHOICES[picks[i.user.id]].label}**! Waiting for opponent...`, ephemeral: true });
+        await i.reply({ content: `✅ You chose **${CHOICES[picks[i.user.id]]}**! Waiting for opponent...`, ephemeral: true });
 
         if (Object.keys(picks).length === 2) {
-          collector.stop('done');
-          const p1 = picks[message.author.id], p2 = picks[opponent.id];
-          let desc, color;
-          const result = determineWinner(p1, p2);
-          if (result === 'draw') {
-            addBalance(message.author.id, bet); addBalance(opponent.id, bet);
-            desc = `🤝 **Draw!** ${CHOICES[p1].label} vs ${CHOICES[p2].label}. Bets returned.`;
-            color = config.colors.warning;
-          } else {
-            const winner = result === 'player' ? message.author : opponent;
-            const loser = result === 'player' ? opponent : message.author;
-            removeBalance(loser.id, bet); removeBalance(winner.id, -bet);
-            addBalance(winner.id, bet * 2);
-            desc = `🏆 **${winner.username} wins!** ${CHOICES[p1].label} vs ${CHOICES[p2].label}\n+**${bet.toLocaleString()}** ${config.currency}!`;
-            color = config.colors.success;
-          }
-          const resultEmbed = new EmbedBuilder().setColor(color).setTitle('✊ RPS Result').setDescription(desc).setTimestamp();
-          reply.edit({ embeds: [resultEmbed], components: [] }).catch(() => {});
+          pickCollector.stop('done');
         }
       });
 
-      collector.on('end', (_, reason) => {
+      pickCollector.on('end', async (_, reason) => {
         if (reason !== 'done') {
-          if (!picks[message.author.id]) addBalance(message.author.id, bet);
-          if (!picks[opponent.id]) addBalance(opponent.id, bet);
-          reply.edit({ content: '⏰ Game timed out.', components: [] }).catch(() => {});
+          // Someone didn't pick — return bets
+          addWin(message.author.id, bet, isDemo);
+          addWin(opponent.id, bet, oppIsDemo);
+          await challengeMsg.edit({ content: '⏰ Time ran out. Bets returned.', components: [] }).catch(() => {});
+          return;
         }
+
+        const p1Choice = picks[message.author.id];
+        const p2Choice = picks[opponent.id];
+        const pot = bet * 2;
+        let desc, color, winnerId, winnerIsDemo;
+
+        if (p1Choice === p2Choice) {
+          // Tie — house takes 4%
+          const push = tiePayout(bet);
+          addWin(message.author.id, push, isDemo);
+          addWin(opponent.id, push, oppIsDemo);
+          desc = `🤝 **Draw!** ${CHOICES[p1Choice]} vs ${CHOICES[p2Choice]}\nEach player gets back **${push.toLocaleString()}** ${config.currency} (house took 4%).`;
+          color = config.colors.warning;
+        } else if (BEATS[p1Choice] === p2Choice) {
+          addWin(message.author.id, pot, isDemo);
+          recordGame(message.author.id, true, bet);
+          recordGame(opponent.id, false, bet);
+          desc = `🏆 **${message.author.username} wins!** ${CHOICES[p1Choice]} beats ${CHOICES[p2Choice]}\n+**${bet.toLocaleString()}** ${config.currency}!`;
+          color = config.colors.success;
+        } else {
+          addWin(opponent.id, pot, oppIsDemo);
+          recordGame(opponent.id, true, bet);
+          recordGame(message.author.id, false, bet);
+          desc = `🏆 **${opponent.username} wins!** ${CHOICES[p2Choice]} beats ${CHOICES[p1Choice]}\n+**${bet.toLocaleString()}** ${config.currency}!`;
+          color = config.colors.success;
+        }
+
+        const embed = new EmbedBuilder().setColor(color).setTitle('✊ RPS Result')
+          .setDescription(desc).setTimestamp();
+        await challengeMsg.edit({ embeds: [embed], components: [] }).catch(() => {});
       });
+    });
 
-      removeBalance(message.author.id, bet);
-      removeBalance(opponent.id, bet);
-      return;
-    }
-
-    // VS AI
-    let playerChoice = ['r', 'p', 's'].includes(args[1]) ? args[1] : null;
-
-    if (!playerChoice) {
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('rps_r').setLabel('✊ Rock').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('rps_p').setLabel('🖐 Paper').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('rps_s').setLabel('✌️ Scissors').setStyle(ButtonStyle.Danger),
-      );
-      const embed = new EmbedBuilder().setColor(config.colors.primary).setTitle('✊ RPS vs AI').setDescription(`Bet: **${bet.toLocaleString()}** ${config.currency}\nMake your pick!`).setTimestamp();
-      const reply = await message.reply({ embeds: [embed], components: [row] });
-
-      const collector = reply.createMessageComponentCollector({
-        componentType: ComponentType.Button,
-        filter: i => i.user.id === message.author.id,
-        time: 30000,
-        max: 1,
-      });
-
-      collector.on('collect', async i => {
-        playerChoice = i.customId.replace('rps_', '');
-        await i.deferUpdate();
-        await resolveVsAI(message, reply, bet, playerChoice);
-      });
-      collector.on('end', (_, reason) => { if (reason === 'time') reply.edit({ components: [] }).catch(() => {}); });
-      return;
-    }
-
-    removeBalance(message.author.id, bet);
-    const reply = await message.reply({ embeds: [new EmbedBuilder().setColor(config.colors.primary).setTitle('✊ RPS vs AI').setTimestamp()] });
-    await resolveVsAI(message, reply, bet, playerChoice);
+    acceptCollector.on('end', (_, reason) => {
+      if (reason === 'time') challengeMsg.edit({ content: '⏰ Challenge expired.', components: [] }).catch(() => {});
+    });
   },
 };
-
-async function resolveVsAI(message, reply, bet, playerChoice) {
-  const { getUser, removeBalance, addBalance, recordGame } = require('../../utils/database');
-  const config = require('../../config');
-
-  removeBalance(message.author.id, bet);
-  await new Promise(r => setTimeout(r, 800));
-
-  const ai = ['r','p','s'][Math.floor(Math.random() * 3)];
-  const result = CHOICES[playerChoice].beats === ai ? 'win' : playerChoice === ai ? 'draw' : 'lose';
-
-  let desc, color;
-  if (result === 'win') {
-    addBalance(message.author.id, bet * 2);
-    recordGame(message.author.id, true, bet);
-    desc = `🎉 **You Win!** ${CHOICES[playerChoice].label} beats ${CHOICES[ai].label}!\n+**${bet.toLocaleString()}** ${config.currency}`;
-    color = config.colors.success;
-  } else if (result === 'draw') {
-    addBalance(message.author.id, bet);
-    desc = `🤝 **Draw!** Both picked ${CHOICES[playerChoice].label}. Bet returned.`;
-    color = config.colors.warning;
-  } else {
-    recordGame(message.author.id, false, bet);
-    desc = `😢 **AI Wins!** ${CHOICES[ai].label} beats ${CHOICES[playerChoice].label}.\n-**${bet.toLocaleString()}** ${config.currency}`;
-    color = config.colors.error;
-  }
-
-  const newBal = getUser(message.author.id).balance;
-  const embed = new EmbedBuilder().setColor(color).setTitle('✊ RPS vs AI')
-    .setDescription([desc, `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}`].join('\n')).setTimestamp();
-  reply.edit({ embeds: [embed], components: [] }).catch(() => {});
-}

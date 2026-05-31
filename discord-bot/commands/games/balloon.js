@@ -1,49 +1,54 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const { getUser, removeBalance, addBalance, recordGame } = require('../../utils/database');
+const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
+const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
-const MAX_PUMPS = 20;
-const POP_CHANCE_BASE = 0.05; // 5% per pump, increases with each pump
-
 module.exports = {
   name: 'balloon',
-  description: 'Pump the balloon — cash out before it pops! Risk vs Reward',
-  usage: '.balloon <bet>',
+  description: 'Pump the balloon — cash out before it pops!',
+  usage: '.balloon <bet|all|half>',
   async execute(message, args, client) {
-    const bet = parseInt(args[0]);
-    if (isNaN(bet) || bet <= 0) return message.reply({ embeds: [errorEmbed('Invalid Bet', '`Usage: .balloon <bet>`')] });
-
-    const user = getUser(message.author.id);
-    if (user.balance < bet) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `You only have **${user.balance.toLocaleString()}** ${config.currency}`)] });
+    const parsed = parseBet(message.author.id, args[0]);
+    if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
+    const { bet, isDemo } = parsed;
 
     const gameKey = `balloon_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current balloon game!')] });
 
-    removeBalance(message.author.id, bet);
+    spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Balloon', userId: message.author.id, bet });
+
+    // Rig pop point:
+    // Demo: always pops late (12-22 pumps)
+    // Actual high bet (50+): pops early (2-6 pumps)
+    // Actual low bet: moderate (5-14 pumps)
+    let popAt;
+    if (isDemo) {
+      popAt = Math.floor(Math.random() * 11) + 12; // 12-22
+    } else if (bet >= 50) {
+      popAt = Math.floor(Math.random() * 5) + 2;   // 2-6 (early pop)
+    } else {
+      popAt = Math.floor(Math.random() * 10) + 5;  // 5-14
+    }
 
     let pumps = 0;
     let gameOver = false;
-    const popAt = Math.floor(Math.random() * MAX_PUMPS) + 3; // Random pop point
-
+    const SIZES = ['—', '🎈', '🎈', '🎈🎈', '🎈🎈', '🎈🎈🎈', '💥'];
     const getMultiplier = () => parseFloat((1 + pumps * 0.15).toFixed(2));
-
-    const BALLOON_SIZES = ['🎈', '🎈', '🎈🎈', '🎈🎈', '🎈🎈🎈', '💨'];
 
     const buildEmbed = (status = '') => {
       const mult = getMultiplier();
-      const size = pumps === 0 ? '—' : BALLOON_SIZES[Math.min(pumps - 1, BALLOON_SIZES.length - 1)];
+      const size = SIZES[Math.min(pumps, SIZES.length - 1)];
       const bar = `[${'█'.repeat(Math.min(pumps, 20))}${'░'.repeat(Math.max(0, 20 - pumps))}]`;
       return new EmbedBuilder()
-        .setColor(pumps > 15 ? config.colors.error : pumps > 8 ? config.colors.warning : config.colors.primary)
-        .setTitle('🎈 Balloon')
+        .setColor(pumps > 12 ? config.colors.error : pumps > 6 ? config.colors.warning : config.colors.primary)
+        .setTitle(`🎈 Balloon${balLabel(isDemo)}`)
         .setDescription([
-          `${size} **Balloon size:** ${pumps} pumps`,
+          `${size} **${pumps} pumps**`,
           `${bar}`,
-          `Multiplier: **${mult}x** | Potential: **${Math.floor(bet * mult).toLocaleString()}** ${config.currency}`,
-          '',
-          status || '💨 Keep pumping or cash out!',
+          `Multiplier: **${mult}x** | Cash out: **${calcPayout(bet, mult).toLocaleString()}** ${config.currency}`,
+          status ? `\n${status}` : '',
         ].join('\n'))
         .setTimestamp();
     };
@@ -63,36 +68,30 @@ module.exports = {
 
     collector.on('collect', async i => {
       if (i.customId === 'balloon_cash') {
-        if (pumps === 0) { await i.reply({ content: 'Pump at least once!', ephemeral: true }); return; }
+        if (pumps === 0) { await i.reply({ content: 'Pump at least once first!', ephemeral: true }); return; }
         const mult = getMultiplier();
-        const winnings = Math.floor(bet * mult);
-        addBalance(message.author.id, winnings);
+        const winnings = calcPayout(bet, mult);
+        addWin(message.author.id, winnings, isDemo);
         recordGame(message.author.id, true, winnings - bet);
-        const newBal = getUser(message.author.id).balance;
-        gameOver = true;
-        client.activeGames.delete(gameKey);
-        collector.stop();
+        const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+        gameOver = true; client.activeGames.delete(gameKey); collector.stop();
         await i.update({
-          embeds: [buildEmbed(`💰 Cashed out at **${mult}x**! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}`)],
+          embeds: [buildEmbed(`💰 Cashed at **${mult}x**! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)],
           components: [],
         }).catch(() => {});
         return;
       }
 
       pumps++;
-      const popChance = Math.min(0.05 + (pumps / MAX_PUMPS) * 0.5, 0.9);
-
-      if (pumps >= popAt || Math.random() < popChance) {
-        gameOver = true;
-        recordGame(message.author.id, false, bet);
-        const newBal = getUser(message.author.id).balance;
-        client.activeGames.delete(gameKey);
-        collector.stop();
+      if (pumps >= popAt) {
+        gameOver = true; recordGame(message.author.id, false, bet);
+        const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+        client.activeGames.delete(gameKey); collector.stop();
         await i.update({
           embeds: [new EmbedBuilder().setColor(config.colors.error).setTitle('💥 POP!').setDescription([
-            `The balloon **popped** after **${pumps}** pumps!`,
+            `The balloon popped after **${pumps}** pumps!`,
             `Lost **${bet.toLocaleString()}** ${config.currency}.`,
-            `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}`,
+            `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
           ].join('\n')).setTimestamp()],
           components: [],
         }).catch(() => {});
@@ -104,8 +103,8 @@ module.exports = {
     collector.on('end', (_, reason) => {
       client.activeGames.delete(gameKey);
       if (reason === 'time' && !gameOver) {
-        if (pumps > 0) addBalance(message.author.id, Math.floor(bet * getMultiplier()));
-        else addBalance(message.author.id, bet);
+        if (pumps > 0) addWin(message.author.id, calcPayout(bet, getMultiplier()), isDemo);
+        else addWin(message.author.id, bet, isDemo);
         reply.edit({ components: [] }).catch(() => {});
       }
     });

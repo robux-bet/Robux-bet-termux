@@ -1,50 +1,49 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const { getUser, removeBalance, addBalance, recordGame } = require('../../utils/database');
+const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
+const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
-const GRID = 5;
-const TOTAL = GRID * GRID;
+// 4x4 grid = 16 cells → 4 rows of buttons + 1 cashout = 5 rows (Discord max)
+const GRID = 4;
+const TOTAL = GRID * GRID; // 16
 
 function calcMultiplier(revealed, mines) {
   const safe = TOTAL - mines;
   let mult = 1.0;
   for (let i = 0; i < revealed; i++) {
-    mult *= (TOTAL - mines - i) / (TOTAL - i);
+    mult *= (safe - i) / (TOTAL - i);
   }
-  return parseFloat((0.97 / mult).toFixed(2));
+  return Math.max(1, parseFloat((0.97 / mult).toFixed(2)));
 }
 
 module.exports = {
   name: 'mines',
-  description: 'Minesweeper — reveal gems without hitting mines!',
-  usage: '.mines <bet> <mines 1-24>',
+  description: 'Minesweeper — reveal gems without hitting a mine!',
+  usage: '.mines <bet|all|half> [mines 1-15]',
   async execute(message, args, client) {
-    const bet = parseInt(args[0]);
-    if (isNaN(bet) || bet <= 0) return message.reply({ embeds: [errorEmbed('Invalid Bet', '`Usage: .mines <bet> <mines>`')] });
+    const parsed = parseBet(message.author.id, args[0]);
+    if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
+    const { bet, isDemo } = parsed;
 
-    const mineCount = parseInt(args[1]) || 3;
-    if (mineCount < 1 || mineCount > 24) return message.reply({ embeds: [errorEmbed('Invalid Mines', 'Mine count must be between 1 and 24.')] });
-
-    const user = getUser(message.author.id);
-    if (user.balance < bet) return message.reply({ embeds: [errorEmbed('Insufficient Funds', `You only have **${user.balance.toLocaleString()}** ${config.currency}`)] });
+    const mineCount = Math.min(15, Math.max(1, parseInt(args[1]) || 3));
 
     const gameKey = `mines_${message.author.id}`;
-    if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current mines game first!')] });
+    if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current mines game!')] });
 
-    removeBalance(message.author.id, bet);
+    spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Mines', userId: message.author.id, bet });
 
-    // Place mines randomly
-    const cells = Array(TOTAL).fill(false);
+    // Place mines
+    const isMine = Array(TOTAL).fill(false);
     let placed = 0;
     while (placed < mineCount) {
       const idx = Math.floor(Math.random() * TOTAL);
-      if (!cells[idx]) { cells[idx] = true; placed++; }
+      if (!isMine[idx]) { isMine[idx] = true; placed++; }
     }
 
-    const revealed = Array(TOTAL).fill(null); // null=hidden, 'gem', 'mine'
-    let revealedCount = 0;
+    const state = Array(TOTAL).fill(null); // null | 'gem' | 'mine'
+    let revealed = 0;
     let gameOver = false;
 
     const buildRows = (showAll = false) => {
@@ -53,33 +52,35 @@ module.exports = {
         const row = new ActionRowBuilder();
         for (let c = 0; c < GRID; c++) {
           const idx = r * GRID + c;
-          const state = revealed[idx];
-          let emoji = '⬜', style = ButtonStyle.Secondary, disabled = false;
-          if (state === 'gem') { emoji = '💎'; style = ButtonStyle.Success; disabled = true; }
-          else if (state === 'mine') { emoji = '💣'; style = ButtonStyle.Danger; disabled = true; }
-          else if (showAll && cells[idx]) { emoji = '💣'; style = ButtonStyle.Danger; disabled = true; }
+          const s = state[idx];
+          let label = '⬜', style = ButtonStyle.Secondary, disabled = false;
+          if (s === 'gem') { label = '💎'; style = ButtonStyle.Success; disabled = true; }
+          else if (s === 'mine') { label = '💣'; style = ButtonStyle.Danger; disabled = true; }
+          else if (showAll && isMine[idx]) { label = '💣'; style = ButtonStyle.Danger; disabled = true; }
           else if (gameOver) disabled = true;
-          row.addComponents(
-            new ButtonBuilder().setCustomId(`mine_${idx}`).setLabel(emoji).setStyle(style).setDisabled(disabled)
-          );
+          row.addComponents(new ButtonBuilder().setCustomId(`mine_${idx}`).setLabel(label).setStyle(style).setDisabled(disabled));
         }
         rows.push(row);
       }
-      const cashRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('mine_cashout').setLabel(`💰 Cash Out (${calcMultiplier(revealedCount, mineCount)}x)`).setStyle(ButtonStyle.Primary).setDisabled(revealedCount === 0 || gameOver)
-      );
-      rows.push(cashRow);
+      const mult = calcMultiplier(revealed, mineCount);
+      const cashoutVal = calcPayout(bet, mult, true);
+      rows.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('mine_cashout')
+          .setLabel(`💰 Cash Out (${mult}x → ${cashoutVal})`)
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(revealed === 0 || gameOver)
+      ));
       return rows;
     };
 
     const buildEmbed = (status = '') => new EmbedBuilder()
-      .setColor(gameOver ? (revealed.some(r => r === 'mine') ? config.colors.error : config.colors.success) : config.colors.primary)
-      .setTitle('💣 Mines')
+      .setColor(config.colors.primary)
+      .setTitle(`💣 Mines${balLabel(isDemo)}`)
       .setDescription([
-        `Bet: **${bet.toLocaleString()}** ${config.currency} | Mines: **${mineCount}**`,
-        `Gems found: **${revealedCount}** | Multiplier: **${calcMultiplier(revealedCount, mineCount)}x**`,
-        status ? `\n${status}` : '',
-      ].join('\n'))
+        `Bet: **${bet.toLocaleString()}** ${config.currency} | Mines: **${mineCount}** | Gems found: **${revealed}**`,
+        status,
+      ].filter(Boolean).join('\n'))
       .setTimestamp();
 
     const reply = await message.reply({ embeds: [buildEmbed()], components: buildRows() });
@@ -92,52 +93,45 @@ module.exports = {
 
     collector.on('collect', async i => {
       if (i.customId === 'mine_cashout') {
-        const mult = calcMultiplier(revealedCount, mineCount);
-        const winnings = Math.floor(bet * mult);
-        addBalance(message.author.id, winnings);
+        const mult = calcMultiplier(revealed, mineCount);
+        const winnings = calcPayout(bet, mult, true);
+        addWin(message.author.id, winnings, isDemo);
         recordGame(message.author.id, true, winnings - bet);
-        const newBal = getUser(message.author.id).balance;
-        gameOver = true;
-        collector.stop();
+        const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+        gameOver = true; collector.stop(); client.activeGames.delete(gameKey);
         await i.update({
-          embeds: [buildEmbed(`💰 Cashed out at **${mult}x** → Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}`)],
+          embeds: [buildEmbed(`💰 Cashed out at **${mult}x**! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)],
           components: buildRows(true),
         }).catch(() => {});
-        client.activeGames.delete(gameKey);
         return;
       }
 
       const idx = parseInt(i.customId.replace('mine_', ''));
-      if (isNaN(idx) || revealed[idx] !== null) return i.deferUpdate();
+      if (isNaN(idx) || state[idx] !== null) return i.deferUpdate();
 
-      if (cells[idx]) {
-        // Hit mine
-        revealed[idx] = 'mine';
-        gameOver = true;
+      if (isMine[idx]) {
+        state[idx] = 'mine';
+        gameOver = true; collector.stop(); client.activeGames.delete(gameKey);
         recordGame(message.author.id, false, bet);
-        const newBal = getUser(message.author.id).balance;
-        collector.stop();
+        const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         await i.update({
-          embeds: [buildEmbed(`💥 Hit a mine! Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}`)],
+          embeds: [buildEmbed(`💥 Hit a mine! Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)],
           components: buildRows(true),
         }).catch(() => {});
-        client.activeGames.delete(gameKey);
       } else {
-        revealed[idx] = 'gem';
-        revealedCount++;
-        if (revealedCount === TOTAL - mineCount) {
-          // Auto-win all gems
-          const mult = calcMultiplier(revealedCount, mineCount);
-          const winnings = Math.floor(bet * mult);
-          addBalance(message.author.id, winnings);
+        state[idx] = 'gem';
+        revealed++;
+        if (revealed === TOTAL - mineCount) {
+          const mult = calcMultiplier(revealed, mineCount);
+          const winnings = calcPayout(bet, mult, true);
+          addWin(message.author.id, winnings, isDemo);
           recordGame(message.author.id, true, winnings - bet);
-          gameOver = true;
-          collector.stop();
+          gameOver = true; collector.stop(); client.activeGames.delete(gameKey);
+          const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
           await i.update({
-            embeds: [buildEmbed(`🎉 Found all gems! Won **${winnings.toLocaleString()}** ${config.currency}!`)],
+            embeds: [buildEmbed(`🎉 All gems found! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)],
             components: buildRows(true),
           }).catch(() => {});
-          client.activeGames.delete(gameKey);
         } else {
           await i.update({ embeds: [buildEmbed()], components: buildRows() }).catch(() => {});
         }
@@ -147,11 +141,8 @@ module.exports = {
     collector.on('end', (_, reason) => {
       client.activeGames.delete(gameKey);
       if (reason === 'time' && !gameOver) {
-        // Auto-cashout on timeout
-        if (revealedCount > 0) {
-          const mult = calcMultiplier(revealedCount, mineCount);
-          addBalance(message.author.id, Math.floor(bet * mult));
-        }
+        if (revealed > 0) addWin(message.author.id, calcPayout(bet, calcMultiplier(revealed, mineCount), true), isDemo);
+        else addWin(message.author.id, bet, isDemo);
         reply.edit({ components: [] }).catch(() => {});
       }
     });
