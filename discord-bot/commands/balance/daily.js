@@ -5,18 +5,20 @@ const config = require('../../config');
 
 const COOLDOWN = 24 * 60 * 60 * 1000;
 const DAY = 24 * 60 * 60 * 1000;
+const MIN_WAGER = 10;
+const MIN_DEPOSIT = 10;
 
 const WHEEL_SEGMENTS = [
-  { label: '1', value: 1, emoji: '🟤', weight: 20 },
-  { label: '2', value: 2, emoji: '🔵', weight: 18 },
-  { label: '3', value: 3, emoji: '🟢', weight: 15 },
-  { label: '4', value: 4, emoji: '🟡', weight: 13 },
-  { label: '5', value: 5, emoji: '🟠', weight: 11 },
-  { label: '6', value: 6, emoji: '🔴', weight: 9 },
-  { label: '7', value: 7, emoji: '🟣', weight: 7 },
-  { label: '8', value: 8, emoji: '💜', weight: 4 },
-  { label: '9', value: 9, emoji: '💛', weight: 2 },
-  { label: '10', value: 10, emoji: '⭐', weight: 1 },
+  { label: '1',  value: 1,  emoji: '🟤', weight: 20 },
+  { label: '2',  value: 2,  emoji: '🔵', weight: 18 },
+  { label: '3',  value: 3,  emoji: '🟢', weight: 15 },
+  { label: '4',  value: 4,  emoji: '🟡', weight: 13 },
+  { label: '5',  value: 5,  emoji: '🟠', weight: 11 },
+  { label: '6',  value: 6,  emoji: '🔴', weight: 9  },
+  { label: '7',  value: 7,  emoji: '🟣', weight: 7  },
+  { label: '8',  value: 8,  emoji: '💜', weight: 4  },
+  { label: '9',  value: 9,  emoji: '💛', weight: 2  },
+  { label: '10', value: 10, emoji: '⭐', weight: 1  },
 ];
 
 function weightedRandom() {
@@ -29,15 +31,6 @@ function weightedRandom() {
   return WHEEL_SEGMENTS[0];
 }
 
-function hasRequiredStatus(member, code) {
-  const presence = member?.presence;
-  if (!presence) return false;
-  const custom = presence.activities.find(a => a.type === 4);
-  const statusText = (custom?.state || '').toLowerCase();
-  return statusText.includes(`discord.gg/${config.serverInvite.toLowerCase()}`) &&
-         statusText.includes(`code:${code.toLowerCase()}`);
-}
-
 const SPIN_FRAMES = ['🌀', '💫', '⭐', '✨', '🌟'];
 
 module.exports = {
@@ -48,7 +41,7 @@ module.exports = {
     const user = getUser(message.author.id);
     const now = Date.now();
 
-    // 1) Cooldown check
+    // Cooldown check
     if (user.lastDaily && now - user.lastDaily < COOLDOWN) {
       const remaining = COOLDOWN - (now - user.lastDaily);
       const hours = Math.floor(remaining / 3600000);
@@ -59,67 +52,34 @@ module.exports = {
       });
     }
 
-    // 2) Check all 3 requirements
-    const code = user.statusCode;
-    const hasStatus = hasRequiredStatus(message.member, code);
+    // Requirements check
     const hasWagered = user.lastWagered && (now - user.lastWagered < DAY);
     const hasDeposited = user.lastDeposited && (now - user.lastDeposited < DAY);
-    const allMet = hasStatus && hasWagered && hasDeposited;
 
-    if (!allMet) {
+    if (!hasWagered || !hasDeposited) {
       const req = (met, label) => `${met ? '✅' : '❌'} ${label}`;
-      const statusText = `best roblox gambling servers discord.gg/${config.serverInvite} code:${code}`;
-      const unmetCount = [hasStatus, hasWagered, hasDeposited].filter(v => !v).length;
+      const unmetCount = [hasWagered, hasDeposited].filter(v => !v).length;
 
       const embed = new EmbedBuilder()
         .setColor(config.colors.error)
         .setTitle(`🎡 Daily — ${unmetCount} Requirement${unmetCount !== 1 ? 's' : ''} Not Met`)
         .setDescription([
-          req(hasStatus,    `Set a custom Discord status containing your invite code`),
-          req(hasWagered,   'Wager at least **1 Robux** (real balance) in the past 24h'),
-          req(hasDeposited, 'Have at least **1 Robux** deposited in the past 24h'),
-          '',
-          !hasStatus ? '> Click **Copy Status** below to get your exact required status text.' : '',
-        ].filter(l => l !== null).join('\n'))
+          req(hasWagered,   `Wager at least **${MIN_WAGER} Robux** (real balance) in the past 24h`),
+          req(hasDeposited, `Have at least **${MIN_DEPOSIT} Robux** deposited in the past 24h`),
+        ].join('\n'))
         .setTimestamp();
 
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('daily_copystatus')
-          .setLabel('📋 Copy My Status')
-          .setStyle(ButtonStyle.Secondary),
-      );
-
-      const reply = await message.reply({ embeds: [embed], components: [row] });
-
-      const collector = reply.createMessageComponentCollector({
-        componentType: ComponentType.Button,
-        filter: i => i.user.id === message.author.id,
-        time: 60000,
-      });
-
-      collector.on('collect', async i => {
-        await i.reply({
-          content: `Set this as your **custom Discord status** (tap and hold to copy):\n\`\`\`${statusText}\`\`\`\nThen run \`.daily\` again!`,
-          ephemeral: true,
-        });
-      });
-
-      collector.on('end', () => {
-        reply.edit({ components: [] }).catch(() => {});
-      });
-
-      return;
+      return message.reply({ embeds: [embed] });
     }
 
+    // Spin
     const result = weightedRandom();
 
     const buildWheel = (spinning, winner) => {
-      const slots = WHEEL_SEGMENTS.map(seg => {
+      return WHEEL_SEGMENTS.map(seg => {
         if (!spinning && seg.value === winner.value) return `**[${seg.emoji}${seg.label}]**`;
         return `${seg.emoji}${seg.label}`;
-      });
-      return slots.join(' ');
+      }).join(' ');
     };
 
     const embed = new EmbedBuilder()
@@ -132,8 +92,7 @@ module.exports = {
 
     for (let i = 0; i < 4; i++) {
       await new Promise(r => setTimeout(r, 700));
-      const frame = SPIN_FRAMES[i % SPIN_FRAMES.length];
-      embed.setDescription(`${buildWheel(true, null)}\n\n${frame} **Spinning...**`);
+      embed.setDescription(`${buildWheel(true, null)}\n\n${SPIN_FRAMES[i % SPIN_FRAMES.length]} **Spinning...**`);
       await reply.edit({ embeds: [embed] }).catch(() => {});
     }
 
@@ -152,7 +111,7 @@ module.exports = {
         '',
         `🎉 You landed on **${result.emoji} ${result.label}**!`,
         `You received **${result.value}** ${config.currency}`,
-        ``,
+        '',
         `💰 New balance: **${newBal.toLocaleString()}** ${config.currency}`,
       ].join('\n'));
 
