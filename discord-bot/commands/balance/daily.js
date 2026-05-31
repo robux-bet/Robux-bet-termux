@@ -1,6 +1,5 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { getUser, saveUser, addBalance } = require('../../utils/database');
-const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
 const COOLDOWN = 24 * 60 * 60 * 1000;
@@ -31,6 +30,15 @@ function weightedRandom() {
   return WHEEL_SEGMENTS[0];
 }
 
+function hasRequiredStatus(member, code) {
+  const presence = member?.presence;
+  if (!presence) return false;
+  const custom = presence.activities.find(a => a.type === 4);
+  const statusText = (custom?.state || '').toLowerCase();
+  return statusText.includes(`discord.gg/${config.serverInvite.toLowerCase()}`) &&
+         statusText.includes(`code:${code.toLowerCase()}`);
+}
+
 const SPIN_FRAMES = ['🌀', '💫', '⭐', '✨', '🌟'];
 
 module.exports = {
@@ -48,39 +56,71 @@ module.exports = {
       const minutes = Math.floor((remaining % 3600000) / 60000);
       const seconds = Math.floor((remaining % 60000) / 1000);
       return message.reply({
-        embeds: [errorEmbed('On Cooldown', `You already claimed your daily!\nCome back in **${hours}h ${minutes}m ${seconds}s**`)],
+        embeds: [new EmbedBuilder()
+          .setColor(config.colors.error)
+          .setTitle('⏳ On Cooldown')
+          .setDescription(`You already claimed your daily!\nCome back in **${hours}h ${minutes}m ${seconds}s**`)
+          .setTimestamp()],
       });
     }
 
     // Requirements check
-    const hasWagered = user.lastWagered && (now - user.lastWagered < DAY);
-    const hasDeposited = user.lastDeposited && (now - user.lastDeposited < DAY);
+    const code = user.statusCode;
+    const statusText = `best roblox gambling servers discord.gg/${config.serverInvite} code:${code}`;
+    const hasStatus   = hasRequiredStatus(message.member, code);
+    const hasWagered  = !!(user.lastWagered  && now - user.lastWagered  < DAY);
+    const hasDeposited= !!(user.lastDeposited && now - user.lastDeposited < DAY);
 
-    if (!hasWagered || !hasDeposited) {
+    if (!hasStatus || !hasWagered || !hasDeposited) {
       const req = (met, label) => `${met ? '✅' : '❌'} ${label}`;
-      const unmetCount = [hasWagered, hasDeposited].filter(v => !v).length;
+      const unmet = [hasStatus, hasWagered, hasDeposited].filter(v => !v).length;
 
       const embed = new EmbedBuilder()
         .setColor(config.colors.error)
-        .setTitle(`🎡 Daily — ${unmetCount} Requirement${unmetCount !== 1 ? 's' : ''} Not Met`)
+        .setTitle(`🎡 Daily — ${unmet} Requirement${unmet !== 1 ? 's' : ''} Not Met`)
         .setDescription([
+          req(hasStatus,    'Set the required custom Discord status'),
           req(hasWagered,   `Wager at least **${MIN_WAGER} Robux** (real balance) in the past 24h`),
           req(hasDeposited, `Have at least **${MIN_DEPOSIT} Robux** deposited in the past 24h`),
-        ].join('\n'))
+          '',
+          !hasStatus ? '> Click **Copy Status** to get your exact status text.' : '',
+        ].filter(l => l !== null).join('\n'))
         .setTimestamp();
 
-      return message.reply({ embeds: [embed] });
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('daily_copystatus')
+          .setLabel('📋 Copy Status')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(hasStatus),
+      );
+
+      const reply = await message.reply({ embeds: [embed], components: [row] });
+
+      const collector = reply.createMessageComponentCollector({
+        componentType: ComponentType.Button,
+        filter: i => i.user.id === message.author.id,
+        time: 60000,
+      });
+
+      collector.on('collect', async i => {
+        await i.reply({
+          content: `Copy this and set it as your Discord status:\n\`${statusText}\``,
+          ephemeral: true,
+        });
+      });
+
+      collector.on('end', () => { reply.edit({ components: [] }).catch(() => {}); });
+      return;
     }
 
     // Spin
     const result = weightedRandom();
 
-    const buildWheel = (spinning, winner) => {
-      return WHEEL_SEGMENTS.map(seg => {
-        if (!spinning && seg.value === winner.value) return `**[${seg.emoji}${seg.label}]**`;
-        return `${seg.emoji}${seg.label}`;
-      }).join(' ');
-    };
+    const buildWheel = (spinning, winner) => WHEEL_SEGMENTS.map(seg => {
+      if (!spinning && seg.value === winner.value) return `**[${seg.emoji}${seg.label}]**`;
+      return `${seg.emoji}${seg.label}`;
+    }).join(' ');
 
     const embed = new EmbedBuilder()
       .setColor(config.colors.gold)

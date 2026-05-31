@@ -86,6 +86,12 @@ module.exports = {
       components: [adminRow],
     });
 
+    // Ping owner
+    if (config.ownerId) {
+      const owner = await message.client.users.fetch(config.ownerId).catch(() => null);
+      if (owner) owner.send(`📤 **New Withdrawal Ticket**\n**User:** ${message.author.tag} (\`${message.author.id}\`)\n**Amount:** ${amount.toLocaleString()} ${config.currency}\n**Channel:** ${ticketChannel}`).catch(() => {});
+    }
+
     const collector = ticketMsg.createMessageComponentCollector({
       componentType: ComponentType.Button,
       time: 7 * 24 * 60 * 60 * 1000,

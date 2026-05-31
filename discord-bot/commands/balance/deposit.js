@@ -88,6 +88,12 @@ module.exports = {
       components: [adminRow],
     });
 
+    // Ping owner
+    if (config.ownerId) {
+      const owner = await message.client.users.fetch(config.ownerId).catch(() => null);
+      if (owner) owner.send(`📥 **New Deposit Ticket**\n**User:** ${message.author.tag} (\`${message.author.id}\`)\n**Amount:** ${amount.toLocaleString()} ${config.currency}\n**Channel:** ${ticketChannel}`).catch(() => {});
+    }
+
     // Collector for admin buttons
     const collector = ticketMsg.createMessageComponentCollector({
       componentType: ComponentType.Button,
