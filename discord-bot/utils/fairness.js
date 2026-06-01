@@ -69,8 +69,7 @@ function shuffleDeckFromFloats(deck, floats) {
 }
 
 function deriveCrashPoint(float) {
-  if (float < 0.04) return 1.0;
-  return Math.max(1.01, parseFloat((0.96 / (1 - float)).toFixed(2)));
+  return Math.max(1.01, parseFloat((1 / (1 - float)).toFixed(2)));
 }
 
 function deriveWeightedItem(float, items) {

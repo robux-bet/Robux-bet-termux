@@ -32,29 +32,28 @@ function parseBet(userId, arg) {
 }
 
 /**
- * Calculate final payout with 5% house edge.
+ * Calculate final payout.
  * For variable-mult games (applyFloor=true): floor the multiplier first.
  * Sub-2x floored = return bet (break even).
  */
 function calcPayout(bet, mult, applyFloor = false) {
   let m = applyFloor ? Math.floor(mult) : mult;
   if (applyFloor && m <= 1) return bet; // sub-2x → break even
-  return Math.floor(bet * m * 0.95);
+  return Math.floor(bet * m);
 }
 
 /**
- * Tie payout — house keeps 4%.
+ * Tie payout — full return.
  */
 function tiePayout(bet) {
-  return Math.floor(bet * 0.96);
+  return bet;
 }
 
 /**
  * 50/50-style win determination.
- * Demo: 70% win. Actual: 30% win.
  */
 function rigged50Win(isDemo) {
-  return Math.random() < (isDemo ? 0.70 : 0.30);
+  return Math.random() < 0.50;
 }
 
 /**
