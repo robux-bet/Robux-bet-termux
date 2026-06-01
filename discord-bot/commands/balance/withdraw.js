@@ -23,6 +23,14 @@ module.exports = {
       ].join('\n'))] });
     }
 
+    if ((user.wagerRequired || 0) > 0) {
+      return message.reply({ embeds: [errorEmbed('Wager Requirement Not Met', [
+        `You must wager **${user.wagerRequired.toLocaleString()}** more ${config.currency} before you can withdraw.`,
+        ``,
+        `Play any game with your real balance to work it off.`,
+      ].join('\n'))] });
+    }
+
     let ticketChannel;
     try {
       const parentCategory = message.channel.parentId;

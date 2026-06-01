@@ -39,6 +39,7 @@ function getUser(userId) {
   const u = db[userId];
   if (u.demoBalance === undefined) { u.demoBalance = 0; u.hasClaimedDemo = false; saveDB(db); }
   if (!u.statusCode) { u.statusCode = generateStatusCode(userId); saveDB(db); }
+  if (u.wagerRequired === undefined) { u.wagerRequired = 0; saveDB(db); }
   return u;
 }
 
@@ -72,7 +73,11 @@ function claimDemo(userId) {
 function spendBet(userId, amount, demo) {
   const u = getUser(userId);
   if (demo) u.demoBalance = Math.max(0, (u.demoBalance || 0) - amount);
-  else { u.balance = Math.max(0, u.balance - amount); u.lastWagered = Date.now(); }
+  else {
+    u.balance = Math.max(0, u.balance - amount);
+    u.lastWagered = Date.now();
+    u.wagerRequired = Math.max(0, (u.wagerRequired || 0) - amount);
+  }
   saveUser(userId, u);
 }
 

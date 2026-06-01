@@ -21,6 +21,14 @@ module.exports = {
       return message.reply({ embeds: [errorEmbed('Insufficient Funds', `You only have **${sender.balance.toLocaleString()}** ${config.currency}`)] });
     }
 
+    if ((sender.wagerRequired || 0) > 0) {
+      return message.reply({ embeds: [errorEmbed('Wager Requirement Not Met', [
+        `You must wager **${sender.wagerRequired.toLocaleString()}** more ${config.currency} before you can tip.`,
+        ``,
+        `Play any game with your real balance to work it off.`,
+      ].join('\n'))] });
+    }
+
     removeBalance(message.author.id, amount);
     addBalance(target.id, amount);
 
