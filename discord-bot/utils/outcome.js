@@ -24,10 +24,6 @@ function getRiggedMode(userId, isDemo, bet, member) {
     return played < 5 ? 'win' : 'fair';
   }
 
-  const played = u.realGamesPlayed || 0;
-
-  if (played < 2) return 'win';
-
   if (!u.hasUsedAllin && u.balance > 0 && u.balance <= 10 && bet >= u.balance) {
     return 'allin_win';
   }
