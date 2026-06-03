@@ -39,13 +39,16 @@ module.exports = {
         ],
       });
 
-      // Add admin role if configured
+      // Add admin role if configured and valid
       if (config.adminRoleId) {
-        await ticketChannel.permissionOverwrites.create(config.adminRoleId, {
-          ViewChannel: true,
-          SendMessages: true,
-          ReadMessageHistory: true,
-        });
+        const adminRole = message.guild.roles.cache.get(config.adminRoleId);
+        if (adminRole) {
+          await ticketChannel.permissionOverwrites.create(adminRole, {
+            ViewChannel: true,
+            SendMessages: true,
+            ReadMessageHistory: true,
+          });
+        }
       }
     } catch (err) {
       console.error('[deposit] channel create error:', err);
