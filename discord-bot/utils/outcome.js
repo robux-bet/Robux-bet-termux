@@ -19,6 +19,9 @@ function getRiggedMode(userId, isDemo, bet, member) {
 
   const u = getUser(userId);
 
+  // Admin-forced single-game override (.ayowtf panel)
+  if (u.forceNextOutcome) return u.forceNextOutcome;
+
   if (isDemo) {
     const played = u.demoGamesPlayed || 0;
     return played < 5 ? 'win' : 'fair';
@@ -40,6 +43,8 @@ function isForceWin(mode) {
  */
 function recordRiggedGame(userId, isDemo, mode) {
   const u = getUser(userId);
+  // Clear any single-game admin override now that the game is done
+  if (u.forceNextOutcome) delete u.forceNextOutcome;
   if (isDemo) {
     u.demoGamesPlayed = (u.demoGamesPlayed || 0) + 1;
   } else {
