@@ -1,8 +1,15 @@
+const fs = require('fs');
+const path = require('path');
 const config = {
   prefix: "."
 };
 const { errorEmbed } = require('../utils/embeds');
 const botConfig = require('../config');
+
+const DEVMODE_PATH = path.join(__dirname, '../data/devmode.json');
+function isDevMode() {
+  try { return JSON.parse(fs.readFileSync(DEVMODE_PATH, 'utf8')).enabled; } catch { return false; }
+}
 
 console.log("CONFIG PREFIX RAW:", config.prefix);
 
@@ -25,6 +32,10 @@ module.exports = {
       if (alias) command = client.commands.get(alias);
     }
     if (!command) return;
+
+    if (isDevMode() && message.author.id !== botConfig.ownerId) {
+      return message.reply({ embeds: [errorEmbed('🔴 Development Mode', 'The bot is currently under maintenance. Please check back soon!')] });
+    }
 
     if (command.adminOnly) {
       const isAdmin =
