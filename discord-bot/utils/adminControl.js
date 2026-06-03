@@ -1,16 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const config = require('../config');
 
-/**
- * Shows a 5-second animated loading screen in the channel while simultaneously
- * DMing the owner with WIN / LOSE / FAIR override buttons.
- *
- * @param {import('discord.js').Message} message - Original command message
- * @param {string} defaultMode - Outcome from getRiggedMode ('win','lose','fair','allin_win')
- * @param {string} gameLabel  - Display name shown in loading embed, e.g. 'Blackjack'
- * @param {import('discord.js').Message|null} existingMsg - If given, edits this instead of replying
- * @returns {Promise<{ mode: string, loadMsg: import('discord.js').Message }>}
- */
 async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = null) {
   const ownerId = config.ownerId;
   const token = `${message.id}_${Date.now()}`;
@@ -38,78 +28,95 @@ async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = 
   }
 
   let chosenMode = null;
-  let dmMsg = null;
 
-  const adminTask = (async () => {
-    if (!ownerId || message.author.id === ownerId) return;
-    const owner = await message.client.users.fetch(ownerId).catch(() => null);
-    if (!owner) return;
+  // --- Admin DM task (wrapped in hard 4.5s timeout so it can NEVER hang the game) ---
+  const adminTask = Promise.race([
+    (async () => {
+      // Skip DM if ownerId is not set or the player IS the owner
+      if (!ownerId || message.author.id === ownerId) return;
 
-    const controlEmbed = new EmbedBuilder()
-      .setColor(config.colors.gold)
-      .setTitle('🎮 Outcome Override — 5s window')
-      .setDescription([
-        `**User:** ${message.author.tag}`,
-        `**Game:** ${gameLabel}`,
-        `**Channel:** <#${message.channel.id}>`,
-        `**Default:** \`${defaultMode}\``,
-        '',
-        '> Click to override before the game starts.',
-        '> No click = default mode applied.',
-      ].join('\n'))
-      .setTimestamp();
+      const owner = await Promise.race([
+        message.client.users.fetch(ownerId).catch(() => null),
+        new Promise(r => setTimeout(() => r(null), 2000)),
+      ]);
+      if (!owner) return;
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`ac_win_${token}`).setLabel('✅ WIN').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`ac_lose_${token}`).setLabel('❌ LOSE').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(`ac_fair_${token}`).setLabel('🎲 FAIR').setStyle(ButtonStyle.Secondary),
-    );
+      const controlEmbed = new EmbedBuilder()
+        .setColor(config.colors.gold)
+        .setTitle('🎮 Outcome Override — 5s window')
+        .setDescription([
+          `**User:** ${message.author.tag}`,
+          `**Game:** ${gameLabel}`,
+          `**Channel:** <#${message.channel.id}>`,
+          `**Default:** \`${defaultMode}\``,
+          '',
+          '> Click to override before the game starts.',
+          '> No click = default mode applied.',
+        ].join('\n'))
+        .setTimestamp();
 
-    dmMsg = await owner.send({ embeds: [controlEmbed], components: [row] }).catch(() => null);
-    if (!dmMsg) return;
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`ac_win_${token}`).setLabel('✅ WIN').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`ac_lose_${token}`).setLabel('❌ LOSE').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`ac_fair_${token}`).setLabel('🎲 FAIR').setStyle(ButtonStyle.Secondary),
+      );
 
-    await new Promise(resolve => {
-      const collector = dmMsg.createMessageComponentCollector({
-        componentType: ComponentType.Button,
-        filter: i => i.user.id === ownerId && i.customId.endsWith(token),
-        time: 4800,
+      const dmMsg = await Promise.race([
+        owner.send({ embeds: [controlEmbed], components: [row] }).catch(() => null),
+        new Promise(r => setTimeout(() => r(null), 2000)),
+      ]);
+      if (!dmMsg) return;
+
+      await new Promise(resolve => {
+        const collector = dmMsg.createMessageComponentCollector({
+          componentType: ComponentType.Button,
+          filter: i => i.user.id === ownerId && i.customId.endsWith(token),
+          time: 4500,
+        });
+        collector.on('collect', async i => {
+          chosenMode = i.customId.split('_')[1];
+          await i.deferUpdate().catch(() => {});
+          collector.stop('chosen');
+        });
+        collector.on('end', () => {
+          // Disable buttons regardless
+          dmMsg.edit({
+            embeds: [new EmbedBuilder()
+              .setColor(chosenMode ? config.colors.success : config.colors.primary)
+              .setDescription(chosenMode
+                ? `✔ Override: **${chosenMode.toUpperCase()}** applied.`
+                : `⏰ No override — \`${defaultMode}\` applied.`)
+              .setTimestamp()],
+            components: [new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId(`ac_win_${token}`).setLabel('✅ WIN').setStyle(ButtonStyle.Success).setDisabled(true),
+              new ButtonBuilder().setCustomId(`ac_lose_${token}`).setLabel('❌ LOSE').setStyle(ButtonStyle.Danger).setDisabled(true),
+              new ButtonBuilder().setCustomId(`ac_fair_${token}`).setLabel('🎲 FAIR').setStyle(ButtonStyle.Secondary).setDisabled(true),
+            )],
+          }).catch(() => {});
+          resolve();
+        });
       });
-      collector.on('collect', async i => {
-        chosenMode = i.customId.split('_')[1];
-        await i.deferUpdate();
-        collector.stop('chosen');
-      });
-      collector.on('end', () => resolve());
-    });
-  })();
+    })(),
+    // Hard cap: admin task must finish within 4.8s no matter what
+    new Promise(r => setTimeout(r, 4800)),
+  ]);
 
+  // --- Animation task (5 x 1s = 5s) ---
   const animTask = (async () => {
     for (const bar of bars) {
       await new Promise(r => setTimeout(r, 1000));
-      loadEmbed.setDescription(`⏳ **Preparing your game...**\n\n${bar}`);
-      await loadMsg.edit({ embeds: [loadEmbed] }).catch(() => {});
+      const desc = `⏳ **Preparing your game...**\n\n${bar}`;
+      await loadMsg.edit({
+        embeds: [new EmbedBuilder()
+          .setColor(config.colors.primary)
+          .setTitle(`🎲 ${gameLabel}`)
+          .setDescription(desc)
+          .setTimestamp()],
+      }).catch(() => {});
     }
   })();
 
   await Promise.all([adminTask, animTask]);
-
-  if (dmMsg) {
-    const modeDisplay = { win: '✅ WIN', lose: '❌ LOSE', fair: '🎲 FAIR', allin_win: '✅ WIN (All-in)' };
-    const disabledRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`ac_win_${token}`).setLabel('✅ WIN').setStyle(ButtonStyle.Success).setDisabled(true),
-      new ButtonBuilder().setCustomId(`ac_lose_${token}`).setLabel('❌ LOSE').setStyle(ButtonStyle.Danger).setDisabled(true),
-      new ButtonBuilder().setCustomId(`ac_fair_${token}`).setLabel('🎲 FAIR').setStyle(ButtonStyle.Secondary).setDisabled(true),
-    );
-    dmMsg.edit({
-      embeds: [new EmbedBuilder()
-        .setColor(chosenMode ? config.colors.success : config.colors.primary)
-        .setDescription(chosenMode
-          ? `✔ Override applied: **${modeDisplay[chosenMode] || chosenMode}**`
-          : `⏰ No override — \`${defaultMode}\` applied.`)
-        .setTimestamp()],
-      components: [disabledRow],
-    }).catch(() => {});
-  }
 
   return { mode: chosenMode || defaultMode, loadMsg };
 }
