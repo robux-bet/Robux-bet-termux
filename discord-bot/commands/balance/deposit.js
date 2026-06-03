@@ -39,9 +39,9 @@ module.exports = {
         ],
       });
 
-      // Add admin role if configured and valid
-      if (config.adminRoleId) {
-        const adminRole = message.guild.roles.cache.get(config.adminRoleId);
+      // Add all configured admin roles if valid
+      for (const roleId of config.adminRoleIds) {
+        const adminRole = message.guild.roles.cache.get(roleId);
         if (adminRole) {
           await ticketChannel.permissionOverwrites.create(adminRole, {
             ViewChannel: true,
@@ -106,7 +106,7 @@ module.exports = {
 
     collector.on('collect', async i => {
       const isAdmin = i.member.permissions.has(PermissionFlagsBits.Administrator) ||
-        (config.adminRoleId && i.member.roles.cache.has(config.adminRoleId));
+        config.adminRoleIds.some(id => i.member.roles.cache.has(id));
 
       if (!isAdmin) {
         return i.reply({ content: '❌ Only admins can approve or deny tickets.', ephemeral: true });

@@ -6,7 +6,7 @@ function isAdminMember(member) {
   if (!member) return false;
   try {
     return member.permissions.has(PermissionFlagsBits.Administrator) ||
-      (config.adminRoleId && member.roles.cache.has(config.adminRoleId));
+      config.adminRoleIds.some(id => member.roles.cache.has(id));
   } catch { return false; }
 }
 

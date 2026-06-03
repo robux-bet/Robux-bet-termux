@@ -4,6 +4,7 @@ module.exports = {
   token: process.env.TOKEN,
   prefix: process.env.PREFIX || '.',
   adminRoleId: process.env.ADMIN_ROLE_ID || '',
+  adminRoleIds: (process.env.ADMIN_ROLE_ID || '').split(',').map(s => s.trim()).filter(Boolean),
   depositChannelId: process.env.DEPOSIT_CHANNEL_ID || '',
   withdrawChannelId: process.env.WITHDRAW_CHANNEL_ID || '',
   serverInvite: process.env.SERVER_INVITE || 'n7wWqamv6b',

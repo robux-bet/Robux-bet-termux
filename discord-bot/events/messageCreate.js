@@ -29,7 +29,7 @@ module.exports = {
     if (command.adminOnly) {
       const isAdmin =
         message.member.permissions.has('Administrator') ||
-        (botConfig.adminRoleId && message.member.roles.cache.has(botConfig.adminRoleId));
+        botConfig.adminRoleIds.some(id => message.member.roles.cache.has(id));
       if (!isAdmin) {
         return message.reply({ embeds: [errorEmbed('Access Denied', 'You need admin permissions to use this command.')] });
       }
