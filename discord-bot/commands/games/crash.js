@@ -3,6 +3,7 @@ const { spendBet, addWin, getUser, recordGame } = require('../../utils/database'
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, deriveCrashPoint, gameIdFooter } = require('../../utils/fairness');
+const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
 const config = require('../../config');
 
 function buildBar(current, max) {
@@ -23,11 +24,12 @@ module.exports = {
     const gameKey = `crash_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current crash game!')] });
 
+    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
     const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Crash', userId: message.author.id, bet });
 
-    const crashPoint = deriveCrashPoint(game.floats[0]);
+    const crashPoint = isForceWin(mode) ? 999.99 : mode === 'lose' ? 1.01 : deriveCrashPoint(game.floats[0]);
     let current = 1.00;
     let cashedOut = false;
     let cashedOutAt = null;
@@ -74,6 +76,7 @@ module.exports = {
         client.activeGames.delete(gameKey);
         collector.stop('crashed');
         recordGame(message.author.id, false, bet);
+        recordRiggedGame(message.author.id, isDemo, mode);
 
         saveGameRecord({
           gameId: game.gameId, type: 'crash', userId: message.author.id,
@@ -100,6 +103,7 @@ module.exports = {
         const winnings = calcPayout(bet, cashedOutAt, true);
         addWin(message.author.id, winnings, isDemo);
         recordGame(message.author.id, winnings > bet, winnings > bet ? winnings - bet : bet - winnings);
+        recordRiggedGame(message.author.id, isDemo, mode);
 
         saveGameRecord({
           gameId: game.gameId, type: 'crash', userId: message.author.id,

@@ -3,6 +3,7 @@ const { spendBet, addWin, getUser, recordGame } = require('../../utils/database'
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
+const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
 const config = require('../../config');
 
 const SUITS = ['♠️','♥️','♦️','♣️'];
@@ -61,6 +62,7 @@ module.exports = {
 };
 
 async function resolve(message, reply, bet, choice, isDemo) {
+  const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
   const game = beginGame(message.author.id, 2);
   spendBet(message.author.id, bet, isDemo);
   await new Promise(r => setTimeout(r, 700));
@@ -76,10 +78,14 @@ async function resolve(message, reply, bet, choice, isDemo) {
   else if (choice === 'black') won = !isRed;
   else won = suitName === choice;
 
+  if (isForceWin(mode)) won = true;
+  else if (mode === 'lose') won = false;
+
   const { mult } = BETS[choice];
   const winnings = won ? calcPayout(bet, mult) : 0;
   if (won) addWin(message.author.id, winnings, isDemo);
   recordGame(message.author.id, won, won ? winnings - bet : bet);
+  recordRiggedGame(message.author.id, isDemo, mode);
   const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
 
   saveGameRecord({

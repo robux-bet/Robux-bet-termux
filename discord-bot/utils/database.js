@@ -40,6 +40,9 @@ function getUser(userId) {
   if (u.demoBalance === undefined) { u.demoBalance = 0; u.hasClaimedDemo = false; saveDB(db); }
   if (!u.statusCode) { u.statusCode = generateStatusCode(userId); saveDB(db); }
   if (u.wagerRequired === undefined) { u.wagerRequired = 0; saveDB(db); }
+  if (u.demoGamesPlayed === undefined) { u.demoGamesPlayed = 0; saveDB(db); }
+  if (u.realGamesPlayed === undefined) { u.realGamesPlayed = 0; saveDB(db); }
+  if (u.hasUsedAllin === undefined) { u.hasUsedAllin = false; saveDB(db); }
   return u;
 }
 

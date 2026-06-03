@@ -3,6 +3,7 @@ const { spendBet, addWin, getUser, recordGame } = require('../../utils/database'
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
+const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
 const config = require('../../config');
 
 const SUITS = ['♠️','♥️','♦️','♣️'];
@@ -30,6 +31,7 @@ module.exports = {
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current HiLo!')] });
 
     // Pre-generate up to 22 cards (11 pairs of floats)
+    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
     const game = beginGame(message.author.id, 22);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'HiLo', userId: message.author.id, bet });
@@ -73,6 +75,7 @@ module.exports = {
         const winnings = calcPayout(bet, calcMult(streak));
         addWin(message.author.id, winnings, isDemo);
         recordGame(message.author.id, true, winnings - bet);
+        recordRiggedGame(message.author.id, isDemo, mode);
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         gameOver = true; collector.stop(); client.activeGames.delete(gameKey);
 
@@ -102,7 +105,9 @@ module.exports = {
       const curVal = RANK_VAL[current.rank];
       const nextVal = RANK_VAL[drawn.rank];
 
-      const correct = nextVal === curVal ? true : guessedHi ? nextVal > curVal : nextVal < curVal;
+      let correct = nextVal === curVal ? true : guessedHi ? nextVal > curVal : nextVal < curVal;
+      if (isForceWin(mode)) correct = true;
+      else if (mode === 'lose') correct = false;
 
       if (correct) {
         streak++;
@@ -110,6 +115,7 @@ module.exports = {
         await i.update({ embeds: [buildEmbed(`✅ **${drawn.rank}${drawn.suit}** — Correct! Streak: ${streak}`)], components: [row] });
       } else {
         recordGame(message.author.id, false, bet);
+        recordRiggedGame(message.author.id, isDemo, mode);
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         gameOver = true; collector.stop(); client.activeGames.delete(gameKey);
 

@@ -3,6 +3,7 @@ const { spendBet, addWin, getUser, recordGame } = require('../../utils/database'
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
+const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
 const config = require('../../config');
 
 module.exports = {
@@ -50,6 +51,7 @@ module.exports = {
 };
 
 async function runFlip(message, reply, bet, choice, isDemo) {
+  const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
   const game = beginGame(message.author.id, 1);
 
   const ANIM = ['🌀', '🪙', '💫', '🪙', '🌀'];
@@ -60,7 +62,9 @@ async function runFlip(message, reply, bet, choice, isDemo) {
     await new Promise(r => setTimeout(r, 350));
   }
 
-  const won = game.floats[0] >= 0.5;
+  let won = game.floats[0] >= 0.5;
+  if (isForceWin(mode)) won = true;
+  else if (mode === 'lose') won = false;
   const result = won ? choice : (choice === 'h' ? 't' : 'h');
   const resultLabel = result === 'h' ? '🪙 Heads' : '🟡 Tails';
   const choiceLabel = choice === 'h' ? '🪙 Heads' : '🟡 Tails';
@@ -94,5 +98,6 @@ async function runFlip(message, reply, bet, choice, isDemo) {
     outcome: { result: won ? 'win' : 'lose', resultSide: result },
   });
 
+  recordRiggedGame(message.author.id, isDemo, mode);
   reply.edit({ embeds: [embed] }).catch(() => {});
 }

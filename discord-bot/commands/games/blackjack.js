@@ -3,6 +3,7 @@ const { spendBet, addWin, getUser, recordGame } = require('../../utils/database'
 const { parseBet, calcPayout, tiePayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, shuffleDeckFromFloats, gameIdFooter } = require('../../utils/fairness');
+const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
 const config = require('../../config');
 
 const SUITS = ['♠️','♥️','♦️','♣️'];
@@ -44,11 +45,17 @@ module.exports = {
     const gameKey = `bj_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current Blackjack first!')] });
 
+    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
     const game = beginGame(message.author.id, 52);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Blackjack', userId: message.author.id, bet });
 
-    const deck = shuffleDeckFromFloats(buildDeck(), game.floats);
+    let deck = shuffleDeckFromFloats(buildDeck(), game.floats);
+    // Force win: give player Ace + King for instant natural blackjack
+    if (isForceWin(mode)) {
+      deck = deck.filter(c => !(c.rank === 'A' && c.suit === '♠️') && !(c.rank === 'K' && c.suit === '♥️'));
+      deck.unshift({ rank: 'K', suit: '♥️' }, { rank: 'A', suit: '♠️' });
+    }
     let deckIdx = 0;
     const drawCard = () => deck[deckIdx++];
 
@@ -79,31 +86,27 @@ module.exports = {
     if (handValue(player) === 21) {
       const dealerVal = handValue(dealer);
       client.activeGames.delete(gameKey);
-      if (dealerVal === 21) {
-        const push = tiePayout(bet);
-        addWin(message.author.id, push, isDemo);
-        recordGame(message.author.id, false, 0);
-        saveGameRecord({
-          gameId: game.gameId, type: 'blackjack', userId: message.author.id,
-          serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
-          clientSeed: game.clientSeed, nonce: game.nonce,
-          inputs: { actions: ['natural'] },
-          outcome: { playerHand: handStr(player), dealerHand: handStr(dealer), result: 'push' },
-        });
-        return message.reply({ embeds: [buildEmbed(true, 'push').setDescription(`Both got Blackjack! Push — got back **${push.toLocaleString()}** ${config.currency}.`)] });
-      }
-      const win = calcPayout(bet, 2);
-      addWin(message.author.id, win, isDemo);
-      recordGame(message.author.id, true, win - bet);
-      const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+      let naturalResult;
+      if (mode === 'lose') naturalResult = 'lose';
+      else if (dealerVal === 21) naturalResult = 'push';
+      else naturalResult = 'win';
+
+      let naturalWin = 0;
+      if (naturalResult === 'win') { naturalWin = calcPayout(bet, 2); addWin(message.author.id, naturalWin, isDemo); }
+      else if (naturalResult === 'push') { naturalWin = tiePayout(bet); addWin(message.author.id, naturalWin, isDemo); }
+      recordGame(message.author.id, naturalResult === 'win', naturalResult === 'win' ? naturalWin - bet : bet);
+      recordRiggedGame(message.author.id, isDemo, mode);
       saveGameRecord({
         gameId: game.gameId, type: 'blackjack', userId: message.author.id,
         serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
         clientSeed: game.clientSeed, nonce: game.nonce,
         inputs: { actions: ['natural'] },
-        outcome: { playerHand: handStr(player), dealerHand: handStr(dealer), result: 'win' },
+        outcome: { playerHand: handStr(player), dealerHand: handStr(dealer), result: naturalResult },
       });
-      return message.reply({ embeds: [buildEmbed(true, 'win').setDescription(`🎉 **Blackjack!** Won **${win.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)] });
+      const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
+      if (naturalResult === 'lose') return message.reply({ embeds: [buildEmbed(true, 'lose').setDescription(`😢 Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)] });
+      if (naturalResult === 'push') return message.reply({ embeds: [buildEmbed(true, 'push').setDescription(`Both got Blackjack! Push — got back **${naturalWin.toLocaleString()}** ${config.currency}.`)] });
+      return message.reply({ embeds: [buildEmbed(true, 'win').setDescription(`🎉 **Blackjack!** Won **${naturalWin.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)] });
     }
 
     const reply = await message.reply({ embeds: [buildEmbed()], components: [row()] });
@@ -120,24 +123,23 @@ module.exports = {
       const pVal = handValue(player);
       const dVal = handValue(dealer);
       const effectiveBet = doubled ? bet * 2 : bet;
-      let result, winnings = 0;
 
-      if (pVal > 21) {
-        result = 'lose';
-      } else if (dVal > 21 || pVal > dVal) {
-        result = 'win';
-        winnings = calcPayout(effectiveBet, 2);
-        addWin(message.author.id, winnings, isDemo);
-      } else if (pVal === dVal) {
-        result = 'push';
-        const push = tiePayout(effectiveBet);
-        addWin(message.author.id, push, isDemo);
-        winnings = push;
-      } else {
-        result = 'lose';
-      }
+      let result;
+      if (pVal > 21) result = 'lose';
+      else if (dVal > 21 || pVal > dVal) result = 'win';
+      else if (pVal === dVal) result = 'push';
+      else result = 'lose';
+
+      // Apply rigging override
+      if (mode === 'lose' && result !== 'lose') result = 'lose';
+      else if (isForceWin(mode) && result === 'lose') result = 'win';
+
+      let winnings = 0;
+      if (result === 'win') { winnings = calcPayout(effectiveBet, 2); addWin(message.author.id, winnings, isDemo); }
+      else if (result === 'push') { winnings = tiePayout(effectiveBet); addWin(message.author.id, winnings, isDemo); }
 
       recordGame(message.author.id, result === 'win', result === 'win' ? winnings - effectiveBet : effectiveBet);
+      recordRiggedGame(message.author.id, isDemo, mode);
       const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
       client.activeGames.delete(gameKey);
 

@@ -3,6 +3,7 @@ const { spendBet, addWin, getUser, recordGame } = require('../../utils/database'
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
+const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
 const config = require('../../config');
 
 const RED = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
@@ -49,6 +50,7 @@ module.exports = {
     const betType = betTarget ? getBetType(betTarget) : null;
     if (!betType) return message.reply({ embeds: [errorEmbed('Invalid Bet Type', 'Choose: `red` `black` `green` `even` `odd` `low` `high` or a number `0-36`')] });
 
+    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
     const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
 
@@ -63,13 +65,42 @@ module.exports = {
     }
 
     await new Promise(r => setTimeout(r, 600));
-    const result = Math.floor(game.floats[0] * 37);
+
+    let result;
+    if (isForceWin(mode)) {
+      switch (betType.type) {
+        case 'number': result = betType.value; break;
+        case 'red':    result = 1; break;
+        case 'black':  result = 2; break;
+        case 'green':  result = 0; break;
+        case 'even':   result = 2; break;
+        case 'odd':    result = 1; break;
+        case 'low':    result = 1; break;
+        case 'high':   result = 19; break;
+        default:       result = Math.floor(game.floats[0] * 37);
+      }
+    } else if (mode === 'lose') {
+      switch (betType.type) {
+        case 'number': result = betType.value === 0 ? 1 : (betType.value + 1) % 37; break;
+        case 'red':    result = 2; break;
+        case 'black':  result = 1; break;
+        case 'green':  result = 1; break;
+        case 'even':   result = 1; break;
+        case 'odd':    result = 2; break;
+        case 'low':    result = 19; break;
+        case 'high':   result = 1; break;
+        default:       result = Math.floor(game.floats[0] * 37);
+      }
+    } else {
+      result = Math.floor(game.floats[0] * 37);
+    }
     const mult = calcMult(betType, result);
     const won = mult > 0;
     const winnings = won ? calcPayout(bet, mult) : 0;
 
     if (won) addWin(message.author.id, winnings, isDemo);
     recordGame(message.author.id, won, won ? winnings - bet : bet);
+    recordRiggedGame(message.author.id, isDemo, mode);
     const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
 
     saveGameRecord({

@@ -3,6 +3,7 @@ const { spendBet, addWin, getUser, recordGame } = require('../../utils/database'
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
+const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
 const config = require('../../config');
 
 const PAYOUT_TABLES = {
@@ -20,6 +21,7 @@ module.exports = {
     if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
     const { bet, isDemo } = parsed;
 
+    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
     const rows = [8, 12, 16].includes(parseInt(args[1])) ? parseInt(args[1]) : 8;
     const game = beginGame(message.author.id, rows);
     spendBet(message.author.id, bet, isDemo);
@@ -32,6 +34,11 @@ module.exports = {
       finalPos += step;
     }
 
+    // Override finalPos based on rigged mode (0 = highest payout, middle = 0x)
+    const zeroSlot = { 8: 4, 12: 5, 16: 7 };
+    if (isForceWin(mode)) finalPos = 0;
+    else if (mode === 'lose') finalPos = zeroSlot[rows] ?? 4;
+
     const payouts = PAYOUT_TABLES[rows];
     const mult = payouts[finalPos] ?? 0;
 
@@ -42,6 +49,7 @@ module.exports = {
 
     if (winnings > 0) addWin(message.author.id, winnings, isDemo);
     recordGame(message.author.id, winnings > bet, winnings > bet ? winnings - bet : bet - winnings);
+    recordRiggedGame(message.author.id, isDemo, mode);
     const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
 
     saveGameRecord({

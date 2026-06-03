@@ -2,6 +2,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentTyp
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
+const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
 const config = require('../../config');
 
 const BOT_NAMES = ['Shadow', 'Blaze', 'Phantom', 'Titan', 'Vortex'];
@@ -30,6 +31,7 @@ module.exports = {
       }
     }
 
+    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
     spendBet(message.author.id, bet, isDemo);
     if (!vsBot) {
       const oppIsDemo = require('../../utils/database').getActivePool(opponent.id).isDemo;
@@ -70,10 +72,11 @@ module.exports = {
       new ButtonBuilder().setCustomId('fight_heal').setLabel('💊 Heal').setStyle(ButtonStyle.Success),
     );
 
-    // Miss chances: demo player = 5%, actual player = 50%
-    // Bot miss: demo = 55%, actual = 15%
-    const playerMissChance = isDemo ? 0.05 : 0.50;
-    const botMissChance = isDemo ? 0.55 : 0.15;
+    // Miss chances adjusted by rigged mode (only affects vs-bot fights)
+    let playerMissChance, botMissChance;
+    if (vsBot && isForceWin(mode)) { playerMissChance = 0.0; botMissChance = 1.0; }
+    else if (vsBot && mode === 'lose') { playerMissChance = 1.0; botMissChance = 0.0; }
+    else { playerMissChance = isDemo ? 0.05 : 0.50; botMissChance = isDemo ? 0.55 : 0.15; }
 
     function applyAttack(attacker, defender, isPlayerAttack) {
       const missChance = isPlayerAttack ? playerMissChance : botMissChance;
@@ -94,6 +97,7 @@ module.exports = {
 
     async function endGame(winnerName) {
       gameOver = true; client.activeGames.delete(gameKey);
+      recordRiggedGame(message.author.id, isDemo, mode);
       let desc, color;
       if (winnerName === p1.name) {
         const payout = calcPayout(bet * 2, 1, false);

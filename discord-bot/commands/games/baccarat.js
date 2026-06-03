@@ -3,6 +3,7 @@ const { spendBet, addWin, getUser, recordGame } = require('../../utils/database'
 const { parseBet, calcPayout, tiePayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
+const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
 const config = require('../../config');
 
 const SUITS = ['♠️','♥️','♦️','♣️'];
@@ -60,6 +61,7 @@ module.exports = {
 };
 
 async function runBaccarat(message, reply, bet, betOn, isDemo) {
+  const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
   const game = beginGame(message.author.id, 12);
   spendBet(message.author.id, bet, isDemo);
 
@@ -82,7 +84,16 @@ async function runBaccarat(message, reply, bet, betOn, isDemo) {
     banker.push(nextCard()); bVal = handVal(banker);
   }
 
-  const trueResult = pVal > bVal ? 'p' : bVal > pVal ? 'b' : 't';
+  let trueResult = pVal > bVal ? 'p' : bVal > pVal ? 'b' : 't';
+  // Apply rigging: force win by making the result match the bet, force lose by making it not match
+  if (isForceWin(mode)) {
+    trueResult = betOn === 't' ? 't' : betOn;
+  } else if (mode === 'lose') {
+    if (betOn === 'p') trueResult = 'b';
+    else if (betOn === 'b') trueResult = 'p';
+    else trueResult = 'p'; // betOn is 't', result is 'p' → lose
+  }
+
   const betLabels = { p: '👤 Player', b: '🏦 Banker', t: '🤝 Tie' };
   let won = betOn === trueResult;
   let winnings = 0;
@@ -91,13 +102,14 @@ async function runBaccarat(message, reply, bet, betOn, isDemo) {
     const mult = betOn === 't' ? 8 : 2;
     winnings = calcPayout(bet, mult);
     addWin(message.author.id, winnings, isDemo);
-  } else if (trueResult === 't' && betOn !== 't') {
+  } else if (trueResult === 't' && betOn !== 't' && mode !== 'lose') {
     const push = tiePayout(bet);
     addWin(message.author.id, push, isDemo);
     winnings = push;
   }
 
   recordGame(message.author.id, won, won ? winnings - bet : bet);
+  recordRiggedGame(message.author.id, isDemo, mode);
   const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
 
   saveGameRecord({

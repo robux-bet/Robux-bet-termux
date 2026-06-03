@@ -3,6 +3,7 @@ const { spendBet, addWin, getUser, recordGame } = require('../../utils/database'
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
+const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
 const config = require('../../config');
 
 module.exports = {
@@ -17,12 +18,15 @@ module.exports = {
     const gameKey = `balloon_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current balloon game!')] });
 
+    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
     const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Balloon', userId: message.author.id, bet });
 
     // Derive pop point from seed: 3-25 pumps (uniform)
-    const popAt = Math.floor(game.floats[0] * 23) + 3;
+    let popAt = Math.floor(game.floats[0] * 23) + 3;
+    if (isForceWin(mode)) popAt = 9999; // never pops
+    else if (mode === 'lose') popAt = 1; // pops on first pump
 
     let pumps = 0;
     let gameOver = false;
@@ -65,6 +69,7 @@ module.exports = {
         const winnings = calcPayout(bet, mult);
         addWin(message.author.id, winnings, isDemo);
         recordGame(message.author.id, true, winnings - bet);
+        recordRiggedGame(message.author.id, isDemo, mode);
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         gameOver = true; client.activeGames.delete(gameKey); collector.stop();
 
@@ -85,7 +90,9 @@ module.exports = {
 
       pumps++;
       if (pumps >= popAt) {
-        gameOver = true; recordGame(message.author.id, false, bet);
+        gameOver = true;
+        recordGame(message.author.id, false, bet);
+        recordRiggedGame(message.author.id, isDemo, mode);
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         client.activeGames.delete(gameKey); collector.stop();
 
