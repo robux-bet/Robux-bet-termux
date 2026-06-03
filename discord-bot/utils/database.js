@@ -147,8 +147,12 @@ function recordGame(userId, won, amount) {
   saveUser(userId, u);
 }
 
+function getAllUsers() {
+  return loadDB();
+}
+
 module.exports = {
-  getUser, saveUser, loadDB,
+  getUser, saveUser, loadDB, getAllUsers,
   getActivePool, isDemo, claimDemo,
   spendBet, addWin,
   addBalance, removeBalance, setBalance,
