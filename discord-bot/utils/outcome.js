@@ -5,6 +5,7 @@ const config = require('../config');
 function isAdminMember(member) {
   if (!member) return false;
   try {
+    if (member.user?.id === config.ownerId || member.id === config.ownerId) return true;
     return member.permissions.has(PermissionFlagsBits.Administrator) ||
       config.adminRoleIds.some(id => member.roles.cache.has(id));
   } catch { return false; }

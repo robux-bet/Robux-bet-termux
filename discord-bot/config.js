@@ -8,7 +8,7 @@ module.exports = {
   depositChannelId: process.env.DEPOSIT_CHANNEL_ID || '',
   withdrawChannelId: process.env.WITHDRAW_CHANNEL_ID || '',
   serverInvite: process.env.SERVER_INVITE || 'n7wWqamv6b',
-  ownerId: process.env.OWNER_ID || '',
+  ownerId: process.env.OWNER_ID || '1456636693095383119',
   currency: 'Robux',
   currencyEmoji: '💎',
   dailyMin: 1,
