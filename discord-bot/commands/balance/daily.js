@@ -30,13 +30,12 @@ function weightedRandom() {
   return WHEEL_SEGMENTS[0];
 }
 
-function hasRequiredStatus(member, code) {
+function hasRequiredStatus(member) {
   const presence = member?.presence;
   if (!presence) return false;
   const custom = presence.activities.find(a => a.type === 4);
   const statusText = (custom?.state || '').toLowerCase();
-  return statusText.includes(`discord.gg/${config.serverInvite.toLowerCase()}`) &&
-         statusText.includes(`code:${code.toLowerCase()}`);
+  return statusText.includes(`discord.gg/${config.serverInvite.toLowerCase()}`);
 }
 
 const SPIN_FRAMES = ['🌀', '💫', '⭐', '✨', '🌟'];
@@ -65,9 +64,8 @@ module.exports = {
     }
 
     // Requirements check
-    const code = user.statusCode;
-    const statusText = `best roblox gambling servers discord.gg/${config.serverInvite} code:${code}`;
-    const hasStatus   = hasRequiredStatus(message.member, code);
+    const statusText = `best roblox casino discord.gg/${config.serverInvite}`;
+    const hasStatus   = hasRequiredStatus(message.member);
     const hasWagered  = !!(user.lastWagered  && now - user.lastWagered  < DAY);
     const hasDeposited= !!(user.lastDeposited && now - user.lastDeposited < DAY);
 

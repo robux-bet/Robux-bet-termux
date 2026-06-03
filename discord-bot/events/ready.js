@@ -9,7 +9,7 @@ module.exports = {
     console.log(`📡 Serving ${client.guilds.cache.size} server(s)`);
 
     client.user.setPresence({
-      activities: [{ name: `best robux gambling server (discord.gg/${config.serverInvite})`, type: ActivityType.Playing }],
+      activities: [{ name: `best roblox casino (discord.gg/${config.serverInvite})`, type: ActivityType.Playing }],
       status: 'online',
     });
   },
