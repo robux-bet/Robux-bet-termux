@@ -48,7 +48,8 @@ module.exports = {
         });
       }
     } catch (err) {
-      return message.reply({ embeds: [errorEmbed('Permission Error', 'I need **Manage Channels** permission to create deposit ticket channels.')] });
+      console.error('[deposit] channel create error:', err);
+      return message.reply({ embeds: [errorEmbed('Ticket Error', `Failed to create ticket channel.\n\`${err.message}\`\n\nMake sure the bot has **Manage Channels** permission and can access the category.`)] });
     }
 
     const user = getUser(message.author.id);
