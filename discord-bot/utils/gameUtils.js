@@ -6,6 +6,11 @@ const config = require('../config');
  * Returns { bet, isDemo } or { error } string.
  */
 function parseBet(userId, arg) {
+  const u = getUser(userId);
+  if (u.locked) {
+    return { error: '🔒 Your account has been locked from gambling. Contact an admin.' };
+  }
+
   const pool = getActivePool(userId);
   if (pool.amount <= 0) {
     return { error: `You have no balance!\n\n💡 Claim **1,000 demo Robux** with \`.demo\`, or ask an admin to add actual balance.` };
@@ -38,7 +43,7 @@ function parseBet(userId, arg) {
  */
 function calcPayout(bet, mult, applyFloor = false) {
   let m = applyFloor ? Math.floor(mult) : mult;
-  if (applyFloor && m <= 1) return bet; // sub-2x → break even
+  if (applyFloor && m <= 1) return bet;
   return Math.floor(bet * m);
 }
 

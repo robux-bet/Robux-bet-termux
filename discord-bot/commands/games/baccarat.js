@@ -4,6 +4,7 @@ const { parseBet, calcPayout, tiePayout, balLabel } = require('../../utils/gameU
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
+const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 const SUITS = ['♠️','♥️','♦️','♣️'];
@@ -12,13 +13,11 @@ const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 function cardFromFloats(f0, f1) {
   return { r: RANKS[Math.floor(f0 * 13)], s: SUITS[Math.floor(f1 * 4)] };
 }
-
 function cardVal(r) {
   if (['10','J','Q','K'].includes(r)) return 0;
   if (r === 'A') return 1;
   return parseInt(r);
 }
-
 function handVal(hand) { return hand.reduce((s, c) => s + cardVal(c.r), 0) % 10; }
 function handStr(hand) { return hand.map(c => `${c.r}${c.s}`).join(' '); }
 
@@ -60,8 +59,10 @@ module.exports = {
   },
 };
 
-async function runBaccarat(message, reply, bet, betOn, isDemo) {
-  const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+async function runBaccarat(message, existingMsg, bet, betOn, isDemo) {
+  const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+  const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Baccarat', existingMsg);
+
   const game = beginGame(message.author.id, 12);
   spendBet(message.author.id, bet, isDemo);
 
@@ -85,13 +86,12 @@ async function runBaccarat(message, reply, bet, betOn, isDemo) {
   }
 
   let trueResult = pVal > bVal ? 'p' : bVal > pVal ? 'b' : 't';
-  // Apply rigging: force win by making the result match the bet, force lose by making it not match
   if (isForceWin(mode)) {
     trueResult = betOn === 't' ? 't' : betOn;
   } else if (mode === 'lose') {
     if (betOn === 'p') trueResult = 'b';
     else if (betOn === 'b') trueResult = 'p';
-    else trueResult = 'p'; // betOn is 't', result is 'p' → lose
+    else trueResult = 'p';
   }
 
   const betLabels = { p: '👤 Player', b: '🏦 Banker', t: '🤝 Tie' };
@@ -117,10 +117,7 @@ async function runBaccarat(message, reply, bet, betOn, isDemo) {
     serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
     clientSeed: game.clientSeed, nonce: game.nonce,
     inputs: { betOn },
-    outcome: {
-      playerHand: handStr(player), bankerHand: handStr(banker),
-      pVal, bVal, winner: trueResult, result: won ? 'win' : trueResult === 't' && betOn !== 't' ? 'push' : 'lose',
-    },
+    outcome: { playerHand: handStr(player), bankerHand: handStr(banker), pVal, bVal, winner: trueResult, result: won ? 'win' : trueResult === 't' && betOn !== 't' ? 'push' : 'lose' },
   });
 
   const embed = new EmbedBuilder()
@@ -140,5 +137,5 @@ async function runBaccarat(message, reply, bet, betOn, isDemo) {
     .setFooter({ text: gameIdFooter(game.gameId) })
     .setTimestamp();
 
-  reply.edit({ embeds: [embed], components: [] }).catch(() => {});
+  loadMsg.edit({ embeds: [embed], components: [] }).catch(() => {});
 }

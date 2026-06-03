@@ -4,6 +4,7 @@ const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
+const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 const RED = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
@@ -50,33 +51,23 @@ module.exports = {
     const betType = betTarget ? getBetType(betTarget) : null;
     if (!betType) return message.reply({ embeds: [errorEmbed('Invalid Bet Type', 'Choose: `red` `black` `green` `even` `odd` `low` `high` or a number `0-36`')] });
 
-    let mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    let defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
 
     // Roulette real-balance rule: bet > 2 = instant lose; bet 1-2 = win up to 3 times then lose
-    if (!isDemo && !isForceWin(mode)) {
+    if (!isDemo && !isForceWin(defaultMode)) {
       if (bet > 2) {
-        mode = 'lose';
+        defaultMode = 'lose';
       } else {
         const u = getUser(message.author.id);
         const smallWins = u.rouletteSmallWins || 0;
-        mode = smallWins < 3 ? 'win' : 'lose';
+        defaultMode = smallWins < 3 ? 'win' : 'lose';
       }
     }
 
+    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Roulette');
+
     const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
-
-    const SPIN = ['🔴','⚫','🟢','🔴','⚫','🔴','⚫'];
-    const embed = new EmbedBuilder().setColor(config.colors.primary).setTitle(`🎡 Roulette${balLabel(isDemo)}`).setTimestamp();
-    const reply = await message.reply({ embeds: [embed.setDescription('🌀 Spinning the wheel...')] });
-
-    for (let i = 0; i < 5; i++) {
-      await new Promise(r => setTimeout(r, 450));
-      embed.setDescription(`${SPIN[i % SPIN.length]} **${Math.floor(Math.random() * 37)}**... spinning`);
-      await reply.edit({ embeds: [embed] }).catch(() => {});
-    }
-
-    await new Promise(r => setTimeout(r, 600));
 
     let result;
     if (isForceWin(mode)) {
@@ -106,6 +97,7 @@ module.exports = {
     } else {
       result = Math.floor(game.floats[0] * 37);
     }
+
     const mult = calcMult(betType, result);
     const won = mult > 0;
     const winnings = won ? calcPayout(bet, mult) : 0;
@@ -114,7 +106,6 @@ module.exports = {
     recordGame(message.author.id, won, won ? winnings - bet : bet);
     recordRiggedGame(message.author.id, isDemo, mode);
 
-    // Track small-bet wins on real balance
     if (won && !isDemo && bet <= 2) {
       const u = getUser(message.author.id);
       u.rouletteSmallWins = (u.rouletteSmallWins || 0) + 1;
@@ -130,8 +121,9 @@ module.exports = {
       outcome: { number: result, result: won ? 'win' : 'lose' },
     });
 
-    embed
+    const embed = new EmbedBuilder()
       .setColor(won ? config.colors.success : config.colors.error)
+      .setTitle(`🎡 Roulette${balLabel(isDemo)}`)
       .setDescription([
         `${getColor(result)} **${result}** — ${result === 0 ? 'Green' : RED.includes(result) ? 'Red' : 'Black'}`,
         `Your bet: **${betTarget}** (${mult}x)`,
@@ -139,10 +131,11 @@ module.exports = {
         won ? `🎉 Won **${winnings.toLocaleString()}** ${config.currency}!` : `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
         `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
         '',
-        `*Payouts: Color/Even/Odd/High/Low = 2x · Number = 35x · Green = 14x (5% house edge)*`,
+        `*Payouts: Color/Even/Odd/High/Low = 2x · Number = 35x · Green = 14x*`,
       ].join('\n'))
-      .setFooter({ text: gameIdFooter(game.gameId) });
+      .setFooter({ text: gameIdFooter(game.gameId) })
+      .setTimestamp();
 
-    reply.edit({ embeds: [embed] }).catch(() => {});
+    loadMsg.edit({ embeds: [embed] }).catch(() => {});
   },
 };

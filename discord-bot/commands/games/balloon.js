@@ -4,6 +4,7 @@ const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
+const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 module.exports = {
@@ -18,15 +19,16 @@ module.exports = {
     const gameKey = `balloon_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current balloon game!')] });
 
-    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Balloon');
+
     const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Balloon', userId: message.author.id, bet });
 
-    // Derive pop point from seed: 3-25 pumps (uniform)
     let popAt = Math.floor(game.floats[0] * 23) + 3;
-    if (isForceWin(mode)) popAt = 9999; // never pops
-    else if (mode === 'lose') popAt = 1; // pops on first pump
+    if (isForceWin(mode)) popAt = 9999;
+    else if (mode === 'lose') popAt = 1;
 
     let pumps = 0;
     let gameOver = false;
@@ -54,9 +56,9 @@ module.exports = {
       new ButtonBuilder().setCustomId('balloon_cash').setLabel('💰 Cash Out').setStyle(ButtonStyle.Success),
     );
 
-    const reply = await message.reply({ embeds: [buildEmbed()], components: [row] });
+    await loadMsg.edit({ embeds: [buildEmbed()], components: [row] });
 
-    const collector = reply.createMessageComponentCollector({
+    const collector = loadMsg.createMessageComponentCollector({
       componentType: ComponentType.Button,
       filter: i => i.user.id === message.author.id,
       time: 120000,
@@ -122,7 +124,7 @@ module.exports = {
       if (reason === 'time' && !gameOver) {
         if (pumps > 0) addWin(message.author.id, calcPayout(bet, getMultiplier()), isDemo);
         else addWin(message.author.id, bet, isDemo);
-        reply.edit({ components: [] }).catch(() => {});
+        loadMsg.edit({ components: [] }).catch(() => {});
       }
     });
   },

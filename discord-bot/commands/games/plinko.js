@@ -4,6 +4,7 @@ const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
+const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 const PAYOUT_TABLES = {
@@ -21,8 +22,10 @@ module.exports = {
     if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
     const { bet, isDemo } = parsed;
 
-    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
     const rows = [8, 12, 16].includes(parseInt(args[1])) ? parseInt(args[1]) : 8;
+    const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Plinko');
+
     const game = beginGame(message.author.id, rows);
     spendBet(message.author.id, bet, isDemo);
 
@@ -34,7 +37,6 @@ module.exports = {
       finalPos += step;
     }
 
-    // Override finalPos based on rigged mode (0 = highest payout, middle = 0x)
     const zeroSlot = { 8: 4, 12: 5, 16: 7 };
     if (isForceWin(mode)) finalPos = 0;
     else if (mode === 'lose') finalPos = zeroSlot[rows] ?? 4;
@@ -60,24 +62,11 @@ module.exports = {
       outcome: { path, finalPos, mult, result: winnings > bet ? 'win' : winnings === bet ? 'push' : 'lose' },
     });
 
-    const embed = new EmbedBuilder()
-      .setColor(config.colors.primary)
-      .setTitle(`🎯 Plinko${balLabel(isDemo)}`)
-      .setDescription(`🟡 Dropping ball... (${rows} rows)`)
-      .setTimestamp();
-    const reply = await message.reply({ embeds: [embed] });
-
-    for (let i = 0; i < 4; i++) {
-      await new Promise(r => setTimeout(r, 550));
-      embed.setDescription(`🟡 Falling... Row ${(i + 1) * Math.floor(rows / 4)}/${rows}`);
-      await reply.edit({ embeds: [embed] }).catch(() => {});
-    }
-    await new Promise(r => setTimeout(r, 600));
-
     const payoutLine = payouts.map((p, i) => i === finalPos ? `**[${p}x]**` : `${p}x`).join(' · ');
 
-    embed
+    const embed = new EmbedBuilder()
       .setColor(winnings > bet ? config.colors.success : winnings === bet ? config.colors.warning : config.colors.error)
+      .setTitle(`🎯 Plinko${balLabel(isDemo)}`)
       .setDescription([
         payoutLine,
         '',
@@ -87,8 +76,9 @@ module.exports = {
           `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
         `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
       ].join('\n'))
-      .setFooter({ text: gameIdFooter(game.gameId) });
+      .setFooter({ text: gameIdFooter(game.gameId) })
+      .setTimestamp();
 
-    reply.edit({ embeds: [embed] }).catch(() => {});
+    loadMsg.edit({ embeds: [embed] }).catch(() => {});
   },
 };

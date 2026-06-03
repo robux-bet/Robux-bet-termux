@@ -35,14 +35,18 @@ function getUser(userId) {
     };
     saveDB(db);
   }
-  // Ensure new fields on existing users
   const u = db[userId];
+  // Ensure all fields exist on older user records
   if (u.demoBalance === undefined) { u.demoBalance = 0; u.hasClaimedDemo = false; saveDB(db); }
   if (!u.statusCode) { u.statusCode = generateStatusCode(userId); saveDB(db); }
   if (u.wagerRequired === undefined) { u.wagerRequired = 0; saveDB(db); }
   if (u.demoGamesPlayed === undefined) { u.demoGamesPlayed = 0; saveDB(db); }
   if (u.realGamesPlayed === undefined) { u.realGamesPlayed = 0; saveDB(db); }
   if (u.hasUsedAllin === undefined) { u.hasUsedAllin = false; saveDB(db); }
+  if (u.locked === undefined) { u.locked = false; saveDB(db); }
+  if (u.depositHoneymoon === undefined) { u.depositHoneymoon = false; saveDB(db); }
+  if (u.depositAmount === undefined) { u.depositAmount = 0; saveDB(db); }
+  if (u.honeyBetsPlaced === undefined) { u.honeyBetsPlaced = 0; saveDB(db); }
   return u;
 }
 
@@ -52,8 +56,6 @@ function saveUser(userId, userData) {
   saveDB(db);
 }
 
-// Which pool is the user currently betting from?
-// Actual (balance > 0) takes priority. Otherwise demo.
 function getActivePool(userId) {
   const u = getUser(userId);
   if (u.balance > 0) return { amount: u.balance, isDemo: false };

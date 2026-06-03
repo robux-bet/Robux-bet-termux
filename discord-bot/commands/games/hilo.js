@@ -4,6 +4,7 @@ const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
+const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 const SUITS = ['♠️','♥️','♦️','♣️'];
@@ -13,7 +14,6 @@ const RANK_VAL = { A:1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,J
 function cardFromFloats(f0, f1) {
   return { rank: RANKS[Math.floor(f0 * 13)], suit: SUITS[Math.floor(f1 * 4)] };
 }
-
 function calcMult(streak) {
   return parseFloat((1 + streak * 0.4).toFixed(2));
 }
@@ -30,8 +30,9 @@ module.exports = {
     const gameKey = `hilo_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current HiLo!')] });
 
-    // Pre-generate up to 22 cards (11 pairs of floats)
-    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Hi-Lo');
+
     const game = beginGame(message.author.id, 22);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'HiLo', userId: message.author.id, bet });
@@ -61,9 +62,9 @@ module.exports = {
       new ButtonBuilder().setCustomId('hilo_cash').setLabel('💰 Cash Out').setStyle(ButtonStyle.Success),
     );
 
-    const reply = await message.reply({ embeds: [buildEmbed()], components: [row] });
+    await loadMsg.edit({ embeds: [buildEmbed()], components: [row] });
 
-    const collector = reply.createMessageComponentCollector({
+    const collector = loadMsg.createMessageComponentCollector({
       componentType: ComponentType.Button,
       filter: i => i.user.id === message.author.id,
       time: 60000,
@@ -144,7 +145,7 @@ module.exports = {
       if (reason === 'time' && !gameOver) {
         if (streak > 0) addWin(message.author.id, calcPayout(bet, calcMult(streak)), isDemo);
         else addWin(message.author.id, bet, isDemo);
-        reply.edit({ components: [] }).catch(() => {});
+        loadMsg.edit({ components: [] }).catch(() => {});
       }
     });
   },

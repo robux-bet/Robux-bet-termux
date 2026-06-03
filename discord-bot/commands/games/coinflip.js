@@ -4,6 +4,7 @@ const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
+const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 module.exports = {
@@ -50,26 +51,26 @@ module.exports = {
   },
 };
 
-async function runFlip(message, reply, bet, choice, isDemo) {
-  const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
-  const game = beginGame(message.author.id, 1);
+async function runFlip(message, existingMsg, bet, choice, isDemo) {
+  const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+  const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Coinflip', existingMsg);
 
-  const ANIM = ['🌀', '🪙', '💫', '🪙', '🌀'];
-  const embed = new EmbedBuilder().setColor(config.colors.primary).setTitle(`🪙 Coinflip${balLabel(isDemo)}`).setTimestamp();
-  for (const frame of ANIM) {
-    embed.setDescription(`${frame} **Flipping...**`);
-    await reply.edit({ embeds: [embed], components: [] }).catch(() => {});
-    await new Promise(r => setTimeout(r, 350));
-  }
+  const game = beginGame(message.author.id, 1);
+  spendBet(message.author.id, bet, isDemo);
 
   let won = game.floats[0] >= 0.5;
   if (isForceWin(mode)) won = true;
   else if (mode === 'lose') won = false;
+
   const result = won ? choice : (choice === 'h' ? 't' : 'h');
   const resultLabel = result === 'h' ? '🪙 Heads' : '🟡 Tails';
   const choiceLabel = choice === 'h' ? '🪙 Heads' : '🟡 Tails';
 
-  spendBet(message.author.id, bet, isDemo);
+  const embed = new EmbedBuilder()
+    .setColor(config.colors.primary)
+    .setTitle(`🪙 Coinflip${balLabel(isDemo)}`)
+    .setTimestamp();
+
   if (won) {
     const payout = calcPayout(bet, 2);
     addWin(message.author.id, payout, isDemo);
@@ -99,5 +100,5 @@ async function runFlip(message, reply, bet, choice, isDemo) {
   });
 
   recordRiggedGame(message.author.id, isDemo, mode);
-  reply.edit({ embeds: [embed] }).catch(() => {});
+  loadMsg.edit({ embeds: [embed] }).catch(() => {});
 }

@@ -40,7 +40,7 @@ module.exports = {
       { name: '🎮 Solo Games', value: solo.join(' · '), inline: false },
       { name: '👥 PvP Games (require @user)', value: pvp.join(' · '), inline: false },
       { name: '🏪 Other', value: '🛍️ market — cosmetics shop', inline: false },
-      { name: '💡 Tip', value: 'Bets support `all` and `half` — e.g. `.cf all` or `.bj half`', inline: false },
+      { name: '⏳ Loading Screen', value: 'Every game shows a **5-second** loading screen before starting. Bets support `all` and `half`.', inline: false },
     );
 
     message.reply({ embeds: [embed] });

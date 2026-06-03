@@ -4,6 +4,7 @@ const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
+const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 const SUITS = ['♠️','♥️','♦️','♣️'];
@@ -61,11 +62,12 @@ module.exports = {
   },
 };
 
-async function resolve(message, reply, bet, choice, isDemo) {
-  const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+async function resolve(message, existingMsg, bet, choice, isDemo) {
+  const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+  const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Card Guess', existingMsg);
+
   const game = beginGame(message.author.id, 2);
   spendBet(message.author.id, bet, isDemo);
-  await new Promise(r => setTimeout(r, 700));
 
   const rankIdx = Math.floor(game.floats[0] * 13);
   const suitIdx = Math.floor(game.floats[1] * 4);
@@ -109,5 +111,5 @@ async function resolve(message, reply, bet, choice, isDemo) {
     .setFooter({ text: gameIdFooter(game.gameId) })
     .setTimestamp();
 
-  reply.edit({ embeds: [embed], components: [] }).catch(() => {});
+  loadMsg.edit({ embeds: [embed], components: [] }).catch(() => {});
 }

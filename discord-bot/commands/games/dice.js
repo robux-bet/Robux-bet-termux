@@ -4,6 +4,7 @@ const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
+const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 const DICE_EMOJI = ['', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
@@ -22,7 +23,9 @@ module.exports = {
       return message.reply({ embeds: [errorEmbed('Invalid Target', 'Pick a number 1–6, `high` (4-6), or `low` (1-3).\n`Usage: .dice <bet> <1-6|high|low>`')] });
     }
 
-    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Dice');
+
     const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
 
@@ -71,6 +74,6 @@ module.exports = {
       .setFooter({ text: gameIdFooter(game.gameId) })
       .setTimestamp();
 
-    message.reply({ embeds: [embed] });
+    loadMsg.edit({ embeds: [embed] }).catch(() => {});
   },
 };

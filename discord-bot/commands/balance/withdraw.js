@@ -96,8 +96,9 @@ module.exports = {
       components: [adminRow],
     });
 
-    // Ping owner
+    // Ping the owner in the ticket channel
     if (config.ownerId) {
+      ticketChannel.send(`<@${config.ownerId}> 📤 New withdrawal ticket opened!`).catch(() => {});
       const owner = await message.client.users.fetch(config.ownerId).catch(() => null);
       if (owner) owner.send(`📤 **New Withdrawal Ticket**\n**User:** ${message.author.tag} (\`${message.author.id}\`)\n**Amount:** ${amount.toLocaleString()} ${config.currency}\n**Channel:** ${ticketChannel}`).catch(() => {});
     }

@@ -4,6 +4,7 @@ const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, deriveMineBoardFromFloats, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
+const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 const GRID = 4;
@@ -12,9 +13,7 @@ const TOTAL = GRID * GRID;
 function calcMultiplier(revealed, mines) {
   const safe = TOTAL - mines;
   let mult = 1.0;
-  for (let i = 0; i < revealed; i++) {
-    mult *= (safe - i) / (TOTAL - i);
-  }
+  for (let i = 0; i < revealed; i++) mult *= (safe - i) / (TOTAL - i);
   return Math.max(1, parseFloat((0.97 / mult).toFixed(2)));
 }
 
@@ -32,14 +31,15 @@ module.exports = {
     const gameKey = `mines_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current mines game!')] });
 
-    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Mines');
+
     const game = beginGame(message.author.id, TOTAL);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Mines', userId: message.author.id, bet });
 
     const mineSet = deriveMineBoardFromFloats(game.floats, TOTAL, mineCount);
     const isMine = Array.from({ length: TOTAL }, (_, i) => mineSet.has(i));
-    // For force lose: all tiles act as mines on click; for display we still use the fair isMine
     const forceWinGame = isForceWin(mode);
     const effectiveIsMine = mode === 'lose' ? Array(TOTAL).fill(true) : isMine;
 
@@ -85,9 +85,9 @@ module.exports = {
       ].filter(Boolean).join('\n'))
       .setTimestamp();
 
-    const reply = await message.reply({ embeds: [buildEmbed()], components: buildRows() });
+    await loadMsg.edit({ embeds: [buildEmbed()], components: buildRows() });
 
-    const collector = reply.createMessageComponentCollector({
+    const collector = loadMsg.createMessageComponentCollector({
       componentType: ComponentType.Button,
       filter: i => i.user.id === message.author.id,
       time: 120000,
@@ -176,7 +176,7 @@ module.exports = {
       if (reason === 'time' && !gameOver) {
         if (revealed > 0) addWin(message.author.id, calcPayout(bet, calcMultiplier(revealed, mineCount), true), isDemo);
         else addWin(message.author.id, bet, isDemo);
-        reply.edit({ components: [] }).catch(() => {});
+        loadMsg.edit({ components: [] }).catch(() => {});
       }
     });
   },

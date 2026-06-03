@@ -4,6 +4,7 @@ const { parseBet, calcPayout, tiePayout, balLabel } = require('../../utils/gameU
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, shuffleDeckFromFloats, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
+const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 const SUITS = ['♠️','♥️','♦️','♣️'];
@@ -14,20 +15,17 @@ function buildDeck() {
   for (const s of SUITS) for (const r of RANKS) d.push({ rank: r, suit: s });
   return d;
 }
-
 function cardValue(rank) {
   if (['J','Q','K'].includes(rank)) return 10;
   if (rank === 'A') return 11;
   return parseInt(rank);
 }
-
 function handValue(hand) {
   let val = 0, aces = 0;
   for (const c of hand) { val += cardValue(c.rank); if (c.rank === 'A') aces++; }
   while (val > 21 && aces > 0) { val -= 10; aces--; }
   return val;
 }
-
 function handStr(hand, hideSecond = false) {
   return hand.map((c, i) => (hideSecond && i === 1) ? '🂠' : `${c.rank}${c.suit}`).join(' ');
 }
@@ -45,13 +43,14 @@ module.exports = {
     const gameKey = `bj_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current Blackjack first!')] });
 
-    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Blackjack');
+
     const game = beginGame(message.author.id, 52);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Blackjack', userId: message.author.id, bet });
 
     let deck = shuffleDeckFromFloats(buildDeck(), game.floats);
-    // Force win: give player Ace + King for instant natural blackjack
     if (isForceWin(mode)) {
       deck = deck.filter(c => !(c.rank === 'A' && c.suit === '♠️') && !(c.rank === 'K' && c.suit === '♥️'));
       deck.unshift({ rank: 'K', suit: '♥️' }, { rank: 'A', suit: '♠️' });
@@ -61,7 +60,6 @@ module.exports = {
 
     let player = [drawCard(), drawCard()];
     const dealer = [drawCard(), drawCard()];
-
     const actions = [];
 
     const buildEmbed = (finished = false, result = '') => {
@@ -104,15 +102,15 @@ module.exports = {
         outcome: { playerHand: handStr(player), dealerHand: handStr(dealer), result: naturalResult },
       });
       const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
-      if (naturalResult === 'lose') return message.reply({ embeds: [buildEmbed(true, 'lose').setDescription(`😢 Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)] });
-      if (naturalResult === 'push') return message.reply({ embeds: [buildEmbed(true, 'push').setDescription(`Both got Blackjack! Push — got back **${naturalWin.toLocaleString()}** ${config.currency}.`)] });
-      return message.reply({ embeds: [buildEmbed(true, 'win').setDescription(`🎉 **Blackjack!** Won **${naturalWin.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)] });
+      if (naturalResult === 'lose') return loadMsg.edit({ embeds: [buildEmbed(true, 'lose').setDescription(`😢 Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)] });
+      if (naturalResult === 'push') return loadMsg.edit({ embeds: [buildEmbed(true, 'push').setDescription(`Both got Blackjack! Push — got back **${naturalWin.toLocaleString()}** ${config.currency}.`)] });
+      return loadMsg.edit({ embeds: [buildEmbed(true, 'win').setDescription(`🎉 **Blackjack!** Won **${naturalWin.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)] });
     }
 
-    const reply = await message.reply({ embeds: [buildEmbed()], components: [row()] });
+    await loadMsg.edit({ embeds: [buildEmbed()], components: [row()] });
     let doubled = false;
 
-    const collector = reply.createMessageComponentCollector({
+    const collector = loadMsg.createMessageComponentCollector({
       componentType: ComponentType.Button,
       filter: i => i.user.id === message.author.id,
       time: 60000,
@@ -130,7 +128,6 @@ module.exports = {
       else if (pVal === dVal) result = 'push';
       else result = 'lose';
 
-      // Apply rigging override
       if (mode === 'lose' && result !== 'lose') result = 'lose';
       else if (isForceWin(mode) && result === 'lose') result = 'win';
 
@@ -156,7 +153,7 @@ module.exports = {
         result === 'push' ? `🤝 Push — got back **${winnings.toLocaleString()}** ${config.currency}.` :
         `😢 Lost **${effectiveBet.toLocaleString()}** ${config.currency}.`;
       embed.setDescription(`${desc}\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`);
-      reply.edit({ embeds: [embed], components: [] }).catch(() => {});
+      loadMsg.edit({ embeds: [embed], components: [] }).catch(() => {});
     }
 
     collector.on('collect', async i => {
@@ -180,7 +177,7 @@ module.exports = {
     });
 
     collector.on('end', (_, reason) => {
-      if (reason === 'time') { client.activeGames.delete(gameKey); addWin(message.author.id, bet, isDemo); reply.edit({ components: [] }).catch(() => {}); }
+      if (reason === 'time') { client.activeGames.delete(gameKey); addWin(message.author.id, bet, isDemo); loadMsg.edit({ components: [] }).catch(() => {}); }
     });
   },
 };

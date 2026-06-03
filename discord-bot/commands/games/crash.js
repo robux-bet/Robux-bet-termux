@@ -4,6 +4,7 @@ const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, deriveCrashPoint, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
+const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 function buildBar(current, max) {
@@ -24,7 +25,9 @@ module.exports = {
     const gameKey = `crash_${message.author.id}`;
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current crash game!')] });
 
-    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Crash');
+
     const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Crash', userId: message.author.id, bet });
@@ -34,7 +37,7 @@ module.exports = {
     let cashedOut = false;
     let cashedOutAt = null;
 
-    const row = new ActionRowBuilder().addComponents(
+    const cashoutRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('crash_cashout').setLabel('💰 Cash Out').setStyle(ButtonStyle.Success)
     );
 
@@ -50,9 +53,9 @@ module.exports = {
       ].join('\n'))
       .setTimestamp();
 
-    const reply = await message.reply({ embeds: [buildEmbed()], components: [row] });
+    await loadMsg.edit({ embeds: [buildEmbed()], components: [cashoutRow] });
 
-    const collector = reply.createMessageComponentCollector({
+    const collector = loadMsg.createMessageComponentCollector({
       componentType: ComponentType.Button,
       filter: i => i.user.id === message.author.id,
       time: 60000,
@@ -90,10 +93,10 @@ module.exports = {
         const embed = buildEmbed(true);
         embed.setDescription(embed.data.description + `\n😢 Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)
           .setFooter({ text: gameIdFooter(game.gameId) });
-        reply.edit({ embeds: [embed], components: [] }).catch(() => {});
+        loadMsg.edit({ embeds: [embed], components: [] }).catch(() => {});
         return;
       }
-      reply.edit({ embeds: [buildEmbed()], components: [row] }).catch(() => {});
+      loadMsg.edit({ embeds: [buildEmbed()], components: [cashoutRow] }).catch(() => {});
     }, 650);
 
     collector.on('end', async (_, reason) => {
@@ -124,7 +127,7 @@ module.exports = {
           ].join('\n'))
           .setFooter({ text: gameIdFooter(game.gameId) })
           .setTimestamp();
-        reply.edit({ embeds: [embed], components: [] }).catch(() => {});
+        loadMsg.edit({ embeds: [embed], components: [] }).catch(() => {});
       }
     });
   },

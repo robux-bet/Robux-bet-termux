@@ -15,7 +15,6 @@ module.exports = {
       return message.reply({ embeds: [errorEmbed('Invalid Amount', 'Please specify how much you want to deposit.\n`Usage: .deposit <amount>`')] });
     }
 
-    // Try to create a proper channel under a category named "Tickets" or in the same category
     let ticketChannel;
     try {
       const parentCategory = message.channel.parentId;
@@ -24,10 +23,7 @@ module.exports = {
         type: ChannelType.GuildText,
         parent: parentCategory || null,
         permissionOverwrites: [
-          {
-            id: message.guild.id,
-            deny: [PermissionFlagsBits.ViewChannel],
-          },
+          { id: message.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
           {
             id: message.author.id,
             allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
@@ -39,20 +35,17 @@ module.exports = {
         ],
       });
 
-      // Add all configured admin roles if valid
       for (const roleId of config.adminRoleIds) {
         const adminRole = message.guild.roles.cache.get(roleId);
         if (adminRole) {
           await ticketChannel.permissionOverwrites.create(adminRole, {
-            ViewChannel: true,
-            SendMessages: true,
-            ReadMessageHistory: true,
+            ViewChannel: true, SendMessages: true, ReadMessageHistory: true,
           });
         }
       }
     } catch (err) {
       console.error('[deposit] channel create error:', err);
-      return message.reply({ embeds: [errorEmbed('Ticket Error', `Failed to create ticket channel.\n\`${err.message}\`\n\nMake sure the bot has **Manage Channels** permission and can access the category.`)] });
+      return message.reply({ embeds: [errorEmbed('Ticket Error', `Failed to create ticket channel.\n\`${err.message}\`\n\nMake sure the bot has **Manage Channels** permission.`)] });
     }
 
     const user = getUser(message.author.id);
@@ -92,16 +85,17 @@ module.exports = {
       components: [adminRow],
     });
 
-    // Ping owner
+    // Ping the owner in the ticket channel
     if (config.ownerId) {
+      ticketChannel.send(`<@${config.ownerId}> 📥 New deposit ticket opened!`).catch(() => {});
+      // Also DM the owner
       const owner = await message.client.users.fetch(config.ownerId).catch(() => null);
       if (owner) owner.send(`📥 **New Deposit Ticket**\n**User:** ${message.author.tag} (\`${message.author.id}\`)\n**Amount:** ${amount.toLocaleString()} ${config.currency}\n**Channel:** ${ticketChannel}`).catch(() => {});
     }
 
-    // Collector for admin buttons
     const collector = ticketMsg.createMessageComponentCollector({
       componentType: ComponentType.Button,
-      time: 7 * 24 * 60 * 60 * 1000, // 7 days
+      time: 7 * 24 * 60 * 60 * 1000,
     });
 
     collector.on('collect', async i => {
@@ -118,6 +112,10 @@ module.exports = {
         const depUser = getUser(uid);
         depUser.lastDeposited = Date.now();
         depUser.wagerRequired = (depUser.wagerRequired || 0) + parseInt(amt);
+        // Activate deposit honeymoon for this user
+        depUser.depositHoneymoon = true;
+        depUser.depositAmount = parseInt(amt);
+        depUser.honeyBetsPlaced = 0;
         require('../../utils/database').saveUser(uid, depUser);
         const newBal = getUser(uid).balance;
         collector.stop();
@@ -129,7 +127,6 @@ module.exports = {
             ].join('\n')).setTimestamp()],
           components: [],
         });
-        // Notify user
         const targetUser = await i.client.users.fetch(uid).catch(() => null);
         if (targetUser) targetUser.send(`✅ Your deposit of **${parseInt(amt).toLocaleString()}** ${config.currency} was approved! New balance: **${newBal.toLocaleString()}**`).catch(() => {});
         setTimeout(() => ticketChannel.delete('Deposit ticket resolved').catch(() => {}), 10000);
@@ -145,14 +142,12 @@ module.exports = {
         if (targetUser) targetUser.send(`❌ Your deposit request was denied. Contact an admin for more info.`).catch(() => {});
         setTimeout(() => ticketChannel.delete('Deposit ticket denied').catch(() => {}), 10000);
       } else if (i.customId === 'dep_close') {
-        if (!isAdmin) return i.reply({ content: 'Only admins can close tickets.', ephemeral: true });
         collector.stop();
         await i.reply({ content: '🔒 Closing ticket in 5 seconds...' });
         setTimeout(() => ticketChannel.delete('Ticket closed').catch(() => {}), 5000);
       }
     });
 
-    // Confirm to the user
     message.reply({
       embeds: [new EmbedBuilder()
         .setColor(config.colors.success)
