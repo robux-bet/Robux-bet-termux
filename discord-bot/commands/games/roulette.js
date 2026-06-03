@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
+const { spendBet, addWin, getUser, saveUser, recordGame } = require('../../utils/database');
 const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
@@ -50,7 +50,19 @@ module.exports = {
     const betType = betTarget ? getBetType(betTarget) : null;
     if (!betType) return message.reply({ embeds: [errorEmbed('Invalid Bet Type', 'Choose: `red` `black` `green` `even` `odd` `low` `high` or a number `0-36`')] });
 
-    const mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+    let mode = getRiggedMode(message.author.id, isDemo, bet, message.member);
+
+    // Roulette real-balance rule: bet > 2 = instant lose; bet 1-2 = win up to 3 times then lose
+    if (!isDemo && !isForceWin(mode)) {
+      if (bet > 2) {
+        mode = 'lose';
+      } else {
+        const u = getUser(message.author.id);
+        const smallWins = u.rouletteSmallWins || 0;
+        mode = smallWins < 3 ? 'win' : 'lose';
+      }
+    }
+
     const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
 
@@ -101,6 +113,13 @@ module.exports = {
     if (won) addWin(message.author.id, winnings, isDemo);
     recordGame(message.author.id, won, won ? winnings - bet : bet);
     recordRiggedGame(message.author.id, isDemo, mode);
+
+    // Track small-bet wins on real balance
+    if (won && !isDemo && bet <= 2) {
+      const u = getUser(message.author.id);
+      u.rouletteSmallWins = (u.rouletteSmallWins || 0) + 1;
+      saveUser(message.author.id, u);
+    }
     const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
 
     saveGameRecord({
