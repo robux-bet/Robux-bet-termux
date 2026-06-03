@@ -19,8 +19,11 @@ module.exports = {
   usage: '.development <on|off>',
   adminOnly: true,
   async execute(message, args) {
-    if (message.author.id !== config.ownerId) {
-      return message.reply('❌ Only the bot owner can toggle development mode.');
+    const isOwner = config.ownerId && message.author.id === config.ownerId;
+    const isAdmin = message.member?.permissions.has('Administrator') ||
+      config.adminRoleIds.some(id => message.member?.roles.cache.has(id));
+    if (!isOwner && !isAdmin) {
+      return message.reply('❌ You need admin permissions to toggle development mode.');
     }
     const input = args[0]?.toLowerCase();
     if (!['on', 'off'].includes(input)) {
