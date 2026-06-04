@@ -16,7 +16,7 @@ function isAdminMember(member) {
  * Call BEFORE spendBet so user.balance reflects pre-bet amount.
  */
 function getRiggedMode(userId, isDemo, bet, member) {
-  if (isAdminMember(member)) return 'win';
+  // Admins get the control panel but same natural odds as everyone else
 
   const u = getUser(userId);
 
