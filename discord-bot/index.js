@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const { loadCommands } = require('./handlers/commandHandler');
+const { loadSlashCommands } = require('./handlers/slashHandler');
 const fs = require('fs');
 const path = require('path');
 
@@ -19,8 +20,11 @@ const client = new Client({
 
 client.startTime = Date.now();
 
-// Load commands
+// Load prefix commands
 loadCommands(client);
+
+// Load slash commands (registered with Discord API on ready)
+loadSlashCommands(client);
 
 // Load events
 const eventsPath = path.join(__dirname, 'events');

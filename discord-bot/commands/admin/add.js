@@ -1,10 +1,10 @@
-const { addBalance } = require('../../utils/database');
+const { addBalance, getUser, saveUser } = require('../../utils/database');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
 module.exports = {
   name: 'add',
-  description: 'Add Robux to a user',
+  description: 'Add Robux to a user (counts as deposit)',
   usage: '.add @user <amount>',
   adminOnly: true,
   guildOnly: true,
@@ -12,15 +12,20 @@ module.exports = {
     const target = message.mentions.users.first();
     if (!target) return message.reply({ embeds: [errorEmbed('Invalid Usage', 'Please mention a user.\n`Usage: .add @user <amount>`')] });
 
-    const amount = parseInt(args[1]);
+    const amount = parseFloat(args[1]);
     if (isNaN(amount) || amount <= 0) return message.reply({ embeds: [errorEmbed('Invalid Amount', 'Please provide a valid positive amount.')] });
 
     const newBal = addBalance(target.id, amount);
 
+    // Track total deposited for stats
+    const u = getUser(target.id);
+    u.totalDeposited = (u.totalDeposited || 0) + amount;
+    saveUser(target.id, u);
+
     message.reply({
       embeds: [
         successEmbed(
-          'Balance Added',
+          '✅ Balance Added',
           `Added **${amount.toLocaleString()}** ${config.currency} to ${target}\n\n${target}'s new balance: **${newBal.toLocaleString()}** ${config.currency}`
         ).setFooter({ text: `Added by ${message.author.tag}` }),
       ],

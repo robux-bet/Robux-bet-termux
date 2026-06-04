@@ -47,6 +47,8 @@ function getUser(userId) {
   if (u.depositHoneymoon === undefined) { u.depositHoneymoon = false; saveDB(db); }
   if (u.depositAmount === undefined) { u.depositAmount = 0; saveDB(db); }
   if (u.honeyBetsPlaced === undefined) { u.honeyBetsPlaced = 0; saveDB(db); }
+  if (u.totalDeposited === undefined) { u.totalDeposited = 0; saveDB(db); }
+  if (u.totalWithdrawn === undefined) { u.totalWithdrawn = 0; saveDB(db); }
   return u;
 }
 
