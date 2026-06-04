@@ -17,6 +17,17 @@ function calcMultiplier(revealed, mines) {
   return Math.max(1, parseFloat((0.97 / mult).toFixed(2)));
 }
 
+const MINES_EXTRAS = {
+  label: '💣 Safe tiles before loss',
+  buttons: [
+    { label: '1 safe tile', value: '1' },
+    { label: '2 safe tiles', value: '2' },
+    { label: '4 safe tiles', value: '4' },
+    { label: '6 safe tiles', value: '6' },
+    { label: '8 safe tiles', value: '8' },
+  ],
+};
+
 module.exports = {
   name: 'mines',
   description: 'Minesweeper — reveal gems without hitting a mine!',
@@ -32,16 +43,18 @@ module.exports = {
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current mines game!')] });
 
     const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
-    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Mines');
+    const { mode, loadMsg, extra } = await awaitAdminControl(message, defaultMode, 'Mines', null, MINES_EXTRAS);
 
     const game = beginGame(message.author.id, TOTAL);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Mines', userId: message.author.id, bet });
 
+    // safeTileLimit: if admin set via extras, pop mine after this many safe tiles
+    const safeTileLimit = extra ? parseInt(extra) : null;
+
     const mineSet = deriveMineBoardFromFloats(game.floats, TOTAL, mineCount);
     const isMine = Array.from({ length: TOTAL }, (_, i) => mineSet.has(i));
     const forceWinGame = isForceWin(mode);
-    const effectiveIsMine = mode === 'lose' ? Array(TOTAL).fill(true) : isMine;
 
     const state = Array(TOTAL).fill(null);
     let revealed = 0;
@@ -69,7 +82,7 @@ module.exports = {
       rows.push(new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('mine_cashout')
-          .setLabel(`💰 Cash Out (${mult}x → ${cashoutVal})`)
+          .setLabel(`💰 Cash Out (${mult}x → ${fmtR(cashoutVal)})`)
           .setStyle(ButtonStyle.Primary)
           .setDisabled(revealed === 0 || gameOver)
       ));
@@ -81,6 +94,7 @@ module.exports = {
       .setTitle(`💣 Mines${balLabel(isDemo)}`)
       .setDescription([
         `Bet: **${fmtR(bet)}** ${config.currency} | Mines: **${mineCount}** | Gems found: **${revealed}**`,
+        safeTileLimit ? `⚙️ *Admin: mine triggers after ${safeTileLimit} safe tiles*` : '',
         status,
       ].filter(Boolean).join('\n'))
       .setTimestamp();
@@ -112,7 +126,7 @@ module.exports = {
         });
 
         await i.update({
-          embeds: [buildEmbed(`💰 Cashed out at **${mult}x**! Won **${fmtR(winnings)}** ${config.currency}!\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
+          embeds: [buildEmbed(`💰 Cashed at **${mult}x**! Won **${fmtR(winnings)}** ${config.currency}!\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
           components: buildRows(true),
         }).catch(() => {});
         return;
@@ -121,7 +135,15 @@ module.exports = {
       const idx = parseInt(i.customId.replace('mine_', ''));
       if (isNaN(idx) || state[idx] !== null) return i.deferUpdate();
 
-      if (effectiveIsMine[idx] && !forceWinGame) {
+      // Determine if this tile is a mine
+      const hitMine = (() => {
+        if (forceWinGame) return false; // WIN mode: never a mine
+        if (safeTileLimit !== null && revealed >= safeTileLimit) return true; // admin tile limit reached
+        if (mode === 'lose' && revealed >= 0) return true; // lose mode: always mine
+        return isMine[idx]; // fair: use board
+      })();
+
+      if (hitMine) {
         state[idx] = 'mine';
         gameOver = true; collector.stop(); client.activeGames.delete(gameKey);
         recordGame(message.author.id, false, bet);
@@ -162,7 +184,7 @@ module.exports = {
           });
 
           await i.update({
-            embeds: [buildEmbed(`🎉 All gems found! Won **${fmtR(winnings)}** ${config.currency}!\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
+            embeds: [buildEmbed(`🎉 All gems! Won **${fmtR(winnings)}** ${config.currency}!\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
             components: buildRows(true),
           }).catch(() => {});
         } else {

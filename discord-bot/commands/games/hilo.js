@@ -10,17 +10,19 @@ const config = require('../../config');
 const SUITS = ['♠️','♥️','♦️','♣️'];
 const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 const RANK_VAL = { A:1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,J:11,Q:12,K:13 };
+const MAX_STREAK = 8; // Hard cap — must cash out by streak 8
+const MULT_PER_STREAK = 0.25; // Reduced from 0.4 — harder
 
-function cardFromFloats(f0, f1) {
-  return { rank: RANKS[Math.floor(f0 * 13)], suit: SUITS[Math.floor(f1 * 4)] };
+function randCard() {
+  return { rank: RANKS[Math.floor(Math.random() * 13)], suit: SUITS[Math.floor(Math.random() * 4)] };
 }
 function calcMult(streak) {
-  return parseFloat((1 + streak * 0.4).toFixed(2));
+  return parseFloat((1 + streak * MULT_PER_STREAK).toFixed(2));
 }
 
 module.exports = {
   name: 'hilo',
-  description: 'Higher or Lower card game',
+  description: 'Higher or Lower — cash out before you guess wrong',
   usage: '.hilo <bet|all|half>',
   async execute(message, args, client) {
     const parsed = parseBet(message.author.id, args[0]);
@@ -37,32 +39,30 @@ module.exports = {
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'HiLo', userId: message.author.id, bet });
 
-    const cards = [];
-    for (let i = 0; i < 11; i++) cards.push(cardFromFloats(game.floats[i * 2], game.floats[i * 2 + 1]));
-
-    let cardIdx = 0;
-    let current = cards[cardIdx];
+    let current = randCard();
     let streak = 0;
     let gameOver = false;
     const actions = [];
+    const cardSequence = [current];
 
     const buildEmbed = (msg = '') => new EmbedBuilder()
-      .setColor(config.colors.primary)
+      .setColor(streak >= 4 ? config.colors.warning : config.colors.primary)
       .setTitle(`🃏 Hi-Lo${balLabel(isDemo)}`)
       .setDescription([
         `Current card: **${current.rank}${current.suit}** (Value: ${RANK_VAL[current.rank]})`,
-        `Streak: **${streak}** | Cash out: **${calcPayout(bet, calcMult(streak))}** ${config.currency}`,
+        `Streak: **${streak}/${MAX_STREAK}** | Cash out: **${fmtR(calcPayout(bet, calcMult(streak)))}** ${config.currency}`,
+        streak >= MAX_STREAK ? '⚠️ Max streak reached — cash out now!' : '',
         msg,
-      ].join('\n'))
+      ].filter(Boolean).join('\n'))
       .setTimestamp();
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('hilo_hi').setLabel('⬆️ Higher').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('hilo_lo').setLabel('⬇️ Lower').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('hilo_cash').setLabel('💰 Cash Out').setStyle(ButtonStyle.Success),
+    const buildRow = (disableCash = false) => new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('hilo_hi').setLabel('⬆️ Higher').setStyle(ButtonStyle.Primary).setDisabled(streak >= MAX_STREAK),
+      new ButtonBuilder().setCustomId('hilo_lo').setLabel('⬇️ Lower').setStyle(ButtonStyle.Secondary).setDisabled(streak >= MAX_STREAK),
+      new ButtonBuilder().setCustomId('hilo_cash').setLabel('💰 Cash Out').setStyle(ButtonStyle.Success).setDisabled(streak === 0 || disableCash),
     );
 
-    await loadMsg.edit({ embeds: [buildEmbed()], components: [row] });
+    await loadMsg.edit({ embeds: [buildEmbed()], components: [buildRow()] });
 
     const collector = loadMsg.createMessageComponentCollector({
       componentType: ComponentType.Button,
@@ -72,8 +72,8 @@ module.exports = {
 
     collector.on('collect', async i => {
       if (i.customId === 'hilo_cash') {
-        if (streak === 0) { await i.reply({ content: 'Make at least one correct guess first!', ephemeral: true }); return; }
-        const winnings = calcPayout(bet, calcMult(streak));
+        const mult = calcMult(streak);
+        const winnings = calcPayout(bet, mult);
         addWin(message.author.id, winnings, isDemo);
         recordGame(message.author.id, true, winnings - bet);
         recordRiggedGame(message.author.id, isDemo, mode);
@@ -85,35 +85,43 @@ module.exports = {
           serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
           clientSeed: game.clientSeed, nonce: game.nonce,
           inputs: { actions },
-          outcome: { cardSequence: cards.slice(0, cardIdx + 1).map(c => `${c.rank}${c.suit}`), result: 'win' },
+          outcome: { cardSequence: cardSequence.map(c => `${c.rank}${c.suit}`), result: 'win' },
         });
 
         await i.update({
-          embeds: [buildEmbed(`💰 Cashed out! Won **${fmtR(winnings)}** ${config.currency}!\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
+          embeds: [buildEmbed(`💰 Cashed out at **${mult}x**! Won **${fmtR(winnings)}** ${config.currency}!\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
           components: [],
-        });
-        return;
-      }
-
-      if (cardIdx + 1 >= cards.length) {
-        await i.reply({ content: 'Max cards reached — game over!', ephemeral: true });
+        }).catch(() => {});
         return;
       }
 
       const guessedHi = i.customId === 'hilo_hi';
       actions.push(guessedHi ? 'hi' : 'lo');
-      const drawn = cards[++cardIdx];
+      const drawn = randCard();
+      cardSequence.push(drawn);
       const curVal = RANK_VAL[current.rank];
       const nextVal = RANK_VAL[drawn.rank];
 
-      let correct = nextVal === curVal ? true : guessedHi ? nextVal > curVal : nextVal < curVal;
+      let correct;
       if (isForceWin(mode)) correct = true;
       else if (mode === 'lose') correct = false;
+      else {
+        // Hard mode: ties count as wrong; edge values are tougher
+        if (nextVal === curVal) correct = false; // ties = always wrong
+        else correct = guessedHi ? nextVal > curVal : nextVal < curVal;
+        // Extra 25% random wrong even on correct guess (makes it harder)
+        if (correct && Math.random() < 0.25) correct = false;
+      }
 
       if (correct) {
         streak++;
         current = drawn;
-        await i.update({ embeds: [buildEmbed(`✅ **${drawn.rank}${drawn.suit}** — Correct! Streak: ${streak}`)], components: [row] });
+        if (streak >= MAX_STREAK) {
+          // Force cash-out at max streak
+          await i.update({ embeds: [buildEmbed(`✅ Correct! Max streak reached — you must cash out!`)], components: [buildRow()] });
+        } else {
+          await i.update({ embeds: [buildEmbed(`✅ **${drawn.rank}${drawn.suit}** — Correct! Streak: ${streak}`)], components: [buildRow()] });
+        }
       } else {
         recordGame(message.author.id, false, bet);
         recordRiggedGame(message.author.id, isDemo, mode);
@@ -125,7 +133,7 @@ module.exports = {
           serverSeed: game.serverSeed, hashedServerSeed: game.hashedServerSeed,
           clientSeed: game.clientSeed, nonce: game.nonce,
           inputs: { actions },
-          outcome: { cardSequence: cards.slice(0, cardIdx + 1).map(c => `${c.rank}${c.suit}`), result: 'lose' },
+          outcome: { cardSequence: cardSequence.map(c => `${c.rank}${c.suit}`), result: 'lose' },
         });
 
         await i.update({
@@ -136,7 +144,7 @@ module.exports = {
               `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,
             ].join('\n')).setFooter({ text: gameIdFooter(game.gameId) }).setTimestamp()],
           components: [],
-        });
+        }).catch(() => {});
       }
     });
 

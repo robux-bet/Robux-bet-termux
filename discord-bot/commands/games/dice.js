@@ -8,19 +8,22 @@ const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 const DICE_EMOJI = ['', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
+const HIGH = [4, 5, 6];
+const LOW = [1, 2, 3];
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 module.exports = {
   name: 'dice',
-  description: 'Roll a dice — pick a number (5x) or high/low (2x)',
-  usage: '.dice <bet|all|half> <1-6|high|low>',
+  description: 'Roll a dice — High (4-6) or Low (1-3)',
+  usage: '.dice <bet|all|half> <high|low>',
   async execute(message, args) {
     const parsed = parseBet(message.author.id, args[0]);
     if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
     const { bet, isDemo } = parsed;
 
     const target = args[1]?.toLowerCase();
-    if (!target || !['1','2','3','4','5','6','high','low'].includes(target)) {
-      return message.reply({ embeds: [errorEmbed('Invalid Target', 'Pick a number 1–6, `high` (4-6), or `low` (1-3).\n`Usage: .dice <bet> <1-6|high|low>`')] });
+    if (!target || !['high', 'low'].includes(target)) {
+      return message.reply({ embeds: [errorEmbed('Invalid Target', 'Pick `high` (4–6) or `low` (1–3).\n`Usage: .dice <bet> <high|low>`')] });
     }
 
     const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
@@ -31,22 +34,14 @@ module.exports = {
 
     let roll;
     if (isForceWin(mode)) {
-      if (target === 'high') roll = 6;
-      else if (target === 'low') roll = 1;
-      else roll = parseInt(target);
-    } else if (mode === 'lose') {
-      if (target === 'high') roll = 1;
-      else if (target === 'low') roll = 6;
-      else roll = parseInt(target) === 6 ? 5 : parseInt(target) + 1;
+      roll = target === 'high' ? pick(HIGH) : pick(LOW);
     } else {
-      roll = Math.floor(game.floats[0] * 6) + 1;
+      // Lose: pick from the opposite side
+      roll = target === 'high' ? pick(LOW) : pick(HIGH);
     }
 
-    let won = false, mult = 0, label = '';
-    if (target === 'high') { won = roll >= 4; mult = 2; label = 'High (4-6)'; }
-    else if (target === 'low') { won = roll <= 3; mult = 2; label = 'Low (1-3)'; }
-    else { won = roll === parseInt(target); mult = 5; label = `Exact: ${target}`; }
-
+    const won = (target === 'high' && roll >= 4) || (target === 'low' && roll <= 3);
+    const mult = 2;
     const winnings = won ? calcPayout(bet, mult) : 0;
     if (won) addWin(message.author.id, winnings, isDemo);
     recordGame(message.author.id, won, won ? winnings - bet : bet);
@@ -61,12 +56,13 @@ module.exports = {
       outcome: { roll, result: won ? 'win' : 'lose' },
     });
 
+    const label = target === 'high' ? 'High (4–6)' : 'Low (1–3)';
     const embed = new EmbedBuilder()
       .setColor(won ? config.colors.success : config.colors.error)
       .setTitle(`🎲 Dice Roll${balLabel(isDemo)}`)
       .setDescription([
         `You rolled: **${DICE_EMOJI[roll]} ${roll}**`,
-        `Your bet: **${label}** (${mult}x)`,
+        `Your bet: **${label}** (2x)`,
         '',
         won ? `🎉 Won **${fmtR(winnings)}** ${config.currency}!` : `😢 Lost **${fmtR(bet)}** ${config.currency}.`,
         `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,

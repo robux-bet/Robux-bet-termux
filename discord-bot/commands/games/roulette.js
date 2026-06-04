@@ -8,6 +8,17 @@ const { awaitAdminControl } = require('../../utils/adminControl');
 const config = require('../../config');
 
 const RED = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
+const BLACK = [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35];
+const EVENS = [2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36];
+const ODDS = [1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31,33,35];
+
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function randInt(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+
+function getColor(num) {
+  if (num === 0) return '🟢';
+  return RED.includes(num) ? '🔴' : '⚫';
+}
 
 function getBetType(bet) {
   const n = parseInt(bet);
@@ -17,23 +28,42 @@ function getBetType(bet) {
   return null;
 }
 
-function getColor(num) {
-  if (num === 0) return '🟢';
-  return RED.includes(num) ? '🔴' : '⚫';
+// Multipliers — balanced, no insane payouts
+function getMult(betType) {
+  switch (betType.type) {
+    case 'number': return 10; // 10x (was 35x)
+    case 'green': return 5;  // 5x  (was 14x)
+    default: return 2;        // red/black/even/odd/low/high = 2x
+  }
 }
 
-function calcMult(betType, result) {
-  const isRed = RED.includes(result);
+// Pick a WINNING result for the bet type (varies randomly)
+function winResult(betType) {
   switch (betType.type) {
-    case 'number': return betType.value === result ? 35 : 0;
-    case 'red':   return isRed ? 2 : 0;
-    case 'black': return !isRed && result !== 0 ? 2 : 0;
-    case 'green': return result === 0 ? 14 : 0;
-    case 'even':  return result !== 0 && result % 2 === 0 ? 2 : 0;
-    case 'odd':   return result % 2 === 1 ? 2 : 0;
-    case 'low':   return result >= 1 && result <= 18 ? 2 : 0;
-    case 'high':  return result >= 19 && result <= 36 ? 2 : 0;
-    default: return 0;
+    case 'red':   return pick(RED);
+    case 'black': return pick(BLACK);
+    case 'green': return 0;
+    case 'even':  return pick(EVENS);
+    case 'odd':   return pick(ODDS);
+    case 'low':   return randInt(1, 18);
+    case 'high':  return randInt(19, 36);
+    case 'number': return betType.value; // must match for number bets (admin WIN only)
+    default: return randInt(1, 36);
+  }
+}
+
+// Pick a LOSING result for the bet type (varies randomly)
+function loseResult(betType) {
+  switch (betType.type) {
+    case 'red':    return pick([...BLACK, 0]);
+    case 'black':  return pick([...RED, 0]);
+    case 'green':  return pick(RED); // not green
+    case 'even': { let r; do { r = randInt(1, 36); } while (r % 2 === 0); return r; }
+    case 'odd':  { let r; do { r = randInt(1, 36); } while (r % 2 !== 0); return r; }
+    case 'low':    return randInt(19, 36);
+    case 'high':   return randInt(1, 18);
+    case 'number': { let r; do { r = randInt(0, 36); } while (r === betType.value); return r; }
+    default: return randInt(0, 36);
   }
 }
 
@@ -41,7 +71,7 @@ module.exports = {
   name: 'roulette',
   aliases: ['rou'],
   description: 'Spin the roulette wheel',
-  usage: '.roulette <bet|all|half> <red|black|green|even|odd|low|high|0-36>',
+  usage: '.roulette <bet|all|half> <red|black|green|even|odd|low|high>',
   async execute(message, args) {
     const parsed = parseBet(message.author.id, args[0]);
     if (parsed.error) return message.reply({ embeds: [errorEmbed('Error', parsed.error)] });
@@ -49,20 +79,14 @@ module.exports = {
 
     const betTarget = args[1]?.toLowerCase();
     const betType = betTarget ? getBetType(betTarget) : null;
-    if (!betType) return message.reply({ embeds: [errorEmbed('Invalid Bet Type', 'Choose: `red` `black` `green` `even` `odd` `low` `high` or a number `0-36`')] });
+    if (!betType) return message.reply({ embeds: [errorEmbed('Invalid Bet', 'Choose: `red` `black` `green` `even` `odd` `low` `high`\n*(Exact numbers are disabled.)*')] });
+
+    // Number bets are disabled in natural play — only admin WIN can force it
+    if (betType.type === 'number' && !isDemo) {
+      return message.reply({ embeds: [errorEmbed('Disabled', 'Exact number bets are disabled. Choose: `red` `black` `green` `even` `odd` `low` `high`')] });
+    }
 
     let defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
-
-    // Roulette real-balance rule: bet > 2 = instant lose; bet 1-2 = win up to 3 times then lose
-    if (!isDemo && !isForceWin(defaultMode)) {
-      if (bet > 2) {
-        defaultMode = 'lose';
-      } else {
-        const u = getUser(message.author.id);
-        const smallWins = u.rouletteSmallWins || 0;
-        defaultMode = smallWins < 3 ? 'win' : 'lose';
-      }
-    }
 
     const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Roulette');
 
@@ -71,46 +95,30 @@ module.exports = {
 
     let result;
     if (isForceWin(mode)) {
-      switch (betType.type) {
-        case 'number': result = betType.value; break;
-        case 'red':    result = 1; break;
-        case 'black':  result = 2; break;
-        case 'green':  result = 0; break;
-        case 'even':   result = 2; break;
-        case 'odd':    result = 1; break;
-        case 'low':    result = 1; break;
-        case 'high':   result = 19; break;
-        default:       result = Math.floor(game.floats[0] * 37);
-      }
-    } else if (mode === 'lose') {
-      switch (betType.type) {
-        case 'number': result = betType.value === 0 ? 1 : (betType.value + 1) % 37; break;
-        case 'red':    result = 2; break;
-        case 'black':  result = 1; break;
-        case 'green':  result = 1; break;
-        case 'even':   result = 1; break;
-        case 'odd':    result = 2; break;
-        case 'low':    result = 19; break;
-        case 'high':   result = 1; break;
-        default:       result = Math.floor(game.floats[0] * 37);
-      }
+      result = winResult(betType);
     } else {
-      result = Math.floor(game.floats[0] * 37);
+      // lose by default for non-demo non-admin
+      result = loseResult(betType);
     }
 
-    const mult = calcMult(betType, result);
-    const won = mult > 0;
-    const winnings = won ? calcPayout(bet, mult) : 0;
+    const mult = getMult(betType);
+    // Determine actual win: check if result matches betType
+    let won = false;
+    switch (betType.type) {
+      case 'red':    won = RED.includes(result); break;
+      case 'black':  won = BLACK.includes(result); break;
+      case 'green':  won = result === 0; break;
+      case 'even':   won = result !== 0 && result % 2 === 0; break;
+      case 'odd':    won = result % 2 === 1; break;
+      case 'low':    won = result >= 1 && result <= 18; break;
+      case 'high':   won = result >= 19 && result <= 36; break;
+      case 'number': won = result === betType.value; break;
+    }
 
+    const winnings = won ? calcPayout(bet, mult) : 0;
     if (won) addWin(message.author.id, winnings, isDemo);
     recordGame(message.author.id, won, won ? winnings - bet : bet);
     recordRiggedGame(message.author.id, isDemo, mode);
-
-    if (won && !isDemo && bet <= 2) {
-      const u = getUser(message.author.id);
-      u.rouletteSmallWins = (u.rouletteSmallWins || 0) + 1;
-      saveUser(message.author.id, u);
-    }
     const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
 
     saveGameRecord({
@@ -131,7 +139,7 @@ module.exports = {
         won ? `🎉 Won **${fmtR(winnings)}** ${config.currency}!` : `😢 Lost **${fmtR(bet)}** ${config.currency}.`,
         `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,
         '',
-        `*Payouts: Color/Even/Odd/High/Low = 2x · Number = 35x · Green = 14x*`,
+        `*Payouts: Color/Even/Odd/High/Low = 2x · Green = 5x*`,
       ].join('\n'))
       .setFooter({ text: gameIdFooter(game.gameId) })
       .setTimestamp();

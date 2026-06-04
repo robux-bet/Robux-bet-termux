@@ -13,6 +13,17 @@ function buildBar(current, max) {
   return `[${'█'.repeat(filled)}${'░'.repeat(20 - filled)}] ${(pct * 100).toFixed(0)}%`;
 }
 
+const CRASH_EXTRAS = {
+  label: '💥 Set Crash Point',
+  buttons: [
+    { label: '💥 Crash 1.2x', value: '1.2' },
+    { label: '💥 Crash 1.5x', value: '1.5' },
+    { label: '💥 Crash 2x',   value: '2'   },
+    { label: '💥 Crash 3x',   value: '3'   },
+    { label: '💥 Crash 5x',   value: '5'   },
+  ],
+};
+
 module.exports = {
   name: 'crash',
   description: 'Watch the multiplier rise — cash out before it crashes!',
@@ -26,13 +37,23 @@ module.exports = {
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current crash game!')] });
 
     const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
-    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Crash');
+    const { mode, loadMsg, extra } = await awaitAdminControl(message, defaultMode, 'Crash', null, CRASH_EXTRAS);
 
     const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);
     client.activeGames.set(gameKey, { name: 'Crash', userId: message.author.id, bet });
 
-    const crashPoint = isForceWin(mode) ? 999.99 : mode === 'lose' ? 1.01 : deriveCrashPoint(game.floats[0]);
+    let crashPoint;
+    if (extra) {
+      // Admin set a specific crash point
+      crashPoint = parseFloat(extra);
+    } else if (isForceWin(mode)) {
+      crashPoint = 999.99;
+    } else {
+      // Always crash early — between 1.01 and 1.8
+      crashPoint = parseFloat((1.01 + Math.random() * 0.79).toFixed(2));
+    }
+
     let current = 1.00;
     let cashedOut = false;
     let cashedOutAt = null;
@@ -62,12 +83,7 @@ module.exports = {
     });
 
     collector.on('collect', async i => {
-      if (!cashedOut) {
-        cashedOut = true;
-        cashedOutAt = current;
-        collector.stop('cashout');
-        await i.deferUpdate();
-      }
+      if (!cashedOut) { cashedOut = true; cashedOutAt = current; collector.stop('cashout'); await i.deferUpdate(); }
     });
 
     const interval = setInterval(async () => {

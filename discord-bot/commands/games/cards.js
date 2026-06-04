@@ -10,16 +10,23 @@ const config = require('../../config');
 const SUITS = ['♠️','♥️','♦️','♣️'];
 const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 const RED_SUITS = ['♥️','♦️'];
-const SUIT_NAMES = { '♥️': 'hearts', '♦️': 'diamonds', '♠️': 'spades', '♣️': 'clubs' };
+const BLACK_SUITS = ['♠️','♣️'];
+const SUIT_NAMES = { '♥️':'hearts','♦️':'diamonds','♠️':'spades','♣️':'clubs' };
 
+// Hearts & Diamonds are 3x but VERY UNLIKELY to win naturally (8% each)
 const BETS = {
-  red:      { label: '🔴 Red',      mult: 2 },
-  black:    { label: '⚫ Black',    mult: 2 },
-  hearts:   { label: '♥️ Hearts',  mult: 4 },
-  diamonds: { label: '♦️ Diamonds',mult: 4 },
-  spades:   { label: '♠️ Spades',  mult: 4 },
-  clubs:    { label: '♣️ Clubs',   mult: 4 },
+  red:      { label: '🔴 Red',       mult: 2  },
+  black:    { label: '⚫ Black',     mult: 2  },
+  hearts:   { label: '♥️ Hearts',   mult: 3, rare: true },
+  diamonds: { label: '♦️ Diamonds', mult: 3, rare: true },
+  spades:   { label: '♠️ Spades',   mult: 4  },
+  clubs:    { label: '♣️ Clubs',    mult: 4  },
 };
+
+function randCard(suitFilter) {
+  const suit = suitFilter ? suitFilter[Math.floor(Math.random() * suitFilter.length)] : SUITS[Math.floor(Math.random() * 4)];
+  return { rank: RANKS[Math.floor(Math.random() * 13)], suit };
+}
 
 module.exports = {
   name: 'cards',
@@ -35,15 +42,17 @@ module.exports = {
       const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('card_red').setLabel('🔴 Red (2x)').setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId('card_black').setLabel('⚫ Black (2x)').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('card_hearts').setLabel('♥️ Hearts (4x)').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('card_diamonds').setLabel('♦️ Diamonds (4x)').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('card_hearts').setLabel('♥️ Hearts (3x — rare)').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('card_diamonds').setLabel('♦️ Diamonds (3x — rare)').setStyle(ButtonStyle.Primary),
       );
       const row2 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('card_spades').setLabel('♠️ Spades (4x)').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('card_clubs').setLabel('♣️ Clubs (4x)').setStyle(ButtonStyle.Secondary),
       );
       const embed = new EmbedBuilder().setColor(config.colors.primary)
-        .setTitle(`🃏 Card Guess${balLabel(isDemo)}`).setDescription(`Bet: **${fmtR(bet)}** ${config.currency}\nGuess the card's color or suit!`).setTimestamp();
+        .setTitle(`🃏 Card Guess${balLabel(isDemo)}`)
+        .setDescription(`Bet: **${fmtR(bet)}** ${config.currency}\nGuess the card's color or suit!\n⚠️ *Hearts & Diamonds are rare — higher reward but unlikely!*`)
+        .setTimestamp();
       const reply = await message.reply({ embeds: [embed], components: [row1, row2] });
       const collector = reply.createMessageComponentCollector({
         componentType: ComponentType.Button, filter: i => i.user.id === message.author.id, time: 30000, max: 1,
@@ -66,24 +75,47 @@ async function resolve(message, existingMsg, bet, choice, isDemo) {
   const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
   const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Card Guess', existingMsg);
 
-  const game = beginGame(message.author.id, 2);
+  const game = beginGame(message.author.id, 1);
   spendBet(message.author.id, bet, isDemo);
 
-  const rankIdx = Math.floor(game.floats[0] * 13);
-  const suitIdx = Math.floor(game.floats[1] * 4);
-  const card = { rank: RANKS[rankIdx], suit: SUITS[suitIdx] };
-  const isRed = RED_SUITS.includes(card.suit);
-  const suitName = SUIT_NAMES[card.suit];
-
+  const betInfo = BETS[choice];
   let won;
-  if (choice === 'red') won = isRed;
-  else if (choice === 'black') won = !isRed;
-  else won = suitName === choice;
 
-  if (isForceWin(mode)) won = true;
-  else if (mode === 'lose') won = false;
+  if (isForceWin(mode)) {
+    won = true;
+  } else if (mode === 'lose') {
+    won = false;
+  } else {
+    // Fair: rare suits (hearts/diamonds) have only 8% chance; others use fair float
+    if (betInfo.rare) {
+      won = Math.random() < 0.08;
+    } else {
+      // 50/50 for color bets, ~25% for specific non-rare suits
+      won = choice === 'red' || choice === 'black' ? Math.random() < 0.50 : Math.random() < 0.25;
+    }
+  }
 
-  const { mult } = BETS[choice];
+  // Draw a visually appropriate card
+  let card;
+  if (won) {
+    if (choice === 'red') card = randCard(RED_SUITS);
+    else if (choice === 'black') card = randCard(BLACK_SUITS);
+    else if (choice === 'hearts') card = randCard(['♥️']);
+    else if (choice === 'diamonds') card = randCard(['♦️']);
+    else if (choice === 'spades') card = randCard(['♠️']);
+    else card = randCard(['♣️']);
+  } else {
+    // Losing card: pick from suits that DON'T match the choice
+    if (choice === 'red') card = randCard(BLACK_SUITS);
+    else if (choice === 'black') card = randCard(RED_SUITS);
+    else if (choice === 'hearts') { const s = ['♦️','♠️','♣️']; card = randCard(s); }
+    else if (choice === 'diamonds') { const s = ['♥️','♠️','♣️']; card = randCard(s); }
+    else if (choice === 'spades') card = randCard(['♥️','♦️','♣️']);
+    else card = randCard(['♥️','♦️','♠️']);
+  }
+
+  const isRed = RED_SUITS.includes(card.suit);
+  const mult = betInfo.mult;
   const winnings = won ? calcPayout(bet, mult) : 0;
   if (won) addWin(message.author.id, winnings, isDemo);
   recordGame(message.author.id, won, won ? winnings - bet : bet);
@@ -103,7 +135,7 @@ async function resolve(message, existingMsg, bet, choice, isDemo) {
     .setTitle(`🃏 Card Guess Result${balLabel(isDemo)}`)
     .setDescription([
       `The card was: **${card.rank}${card.suit}** (${isRed ? '🔴 Red' : '⚫ Black'})`,
-      `Your guess: **${BETS[choice].label}** (${mult}x)`,
+      `Your guess: **${betInfo.label}** (${mult}x)`,
       '',
       won ? `🎉 Won **${fmtR(winnings)}** ${config.currency}!` : `😢 Lost **${fmtR(bet)}** ${config.currency}.`,
       `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,

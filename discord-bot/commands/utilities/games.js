@@ -28,19 +28,16 @@ module.exports = {
     }
 
     const solo = [
-      '🃏 baccarat', '🎈 balloon', '🂡 bj', '🃏 cards',
-      '📈 crash', '🎲 dice', '🃏 hilo', '💣 mines',
-      '🎯 plinko', '🎡 roulette',
+      '🃏 baccarat', '🂡 bj', '🃏 cards',
+      '📈 crash', '🎲 dice', '🃏 hilo', '💣 mines', '🎡 roulette',
     ];
-    const pvp = [
-      '📦 casebattles', '🪙 cf', '⚔️ fight', '✊ rps', '❌ ttt',
-    ];
+    const pvp = ['📦 casebattles', '🪙 cf', '⚔️ fight', '✊ rps', '❌ ttt'];
 
     embed.addFields(
       { name: '🎮 Solo Games', value: solo.join(' · '), inline: false },
       { name: '👥 PvP Games (require @user)', value: pvp.join(' · '), inline: false },
-      { name: '🏪 Other', value: '🛍️ market — cosmetics shop', inline: false },
-      { name: '⏳ Loading Screen', value: 'Every game shows a **5-second** loading screen before starting. Bets support `all` and `half`.', inline: false },
+      { name: '⚙️ Interactive Admin Controls', value: 'Crash & Mines show extra buttons in the control channel to set crash point / safe tile limit.', inline: false },
+      { name: '⏳ Loading Screen', value: 'Every game shows a **5-second** loading screen. Bets support `all` and `half`.', inline: false },
     );
 
     message.reply({ embeds: [embed] });
