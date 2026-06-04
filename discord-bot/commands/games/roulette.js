@@ -88,7 +88,12 @@ module.exports = {
 
     let defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
 
-    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Roulette');
+    const _u = getUser(message.author.id);
+    const _m = getMult(betType);
+    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Roulette', null, null, {
+      bet, mult: `${_m}x`, payout: parseFloat((bet * _m).toFixed(2)),
+      balance: isDemo ? _u.demoBalance : _u.balance, isDemo,
+    });
 
     const game = beginGame(message.author.id, 1);
     spendBet(message.author.id, bet, isDemo);

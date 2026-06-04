@@ -53,7 +53,11 @@ module.exports = {
 
 async function runFlip(message, existingMsg, bet, choice, isDemo) {
   const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
-  const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Coinflip', existingMsg);
+  const _u = getUser(message.author.id);
+  const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Coinflip', existingMsg, null, {
+    bet, mult: '2x', payout: parseFloat((bet * 2).toFixed(2)),
+    balance: isDemo ? _u.demoBalance : _u.balance, isDemo,
+  });
 
   const game = beginGame(message.author.id, 1);
   spendBet(message.author.id, bet, isDemo);

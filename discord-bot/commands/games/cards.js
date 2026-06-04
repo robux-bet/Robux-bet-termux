@@ -73,7 +73,12 @@ module.exports = {
 
 async function resolve(message, existingMsg, bet, choice, isDemo) {
   const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
-  const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Card Guess', existingMsg);
+  const _u = getUser(message.author.id);
+  const _m = BETS[choice].mult;
+  const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Card Guess', existingMsg, null, {
+    bet, mult: `${_m}x`, payout: parseFloat((bet * _m).toFixed(2)),
+    balance: isDemo ? _u.demoBalance : _u.balance, isDemo,
+  });
 
   const game = beginGame(message.author.id, 1);
   spendBet(message.author.id, bet, isDemo);

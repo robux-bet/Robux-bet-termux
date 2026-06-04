@@ -43,7 +43,11 @@ module.exports = {
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current mines game!')] });
 
     const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
-    const { mode, loadMsg, extra } = await awaitAdminControl(message, defaultMode, 'Mines', null, MINES_EXTRAS);
+    const _u = getUser(message.author.id);
+    const { mode, loadMsg, extra } = await awaitAdminControl(message, defaultMode, 'Mines', null, MINES_EXTRAS, {
+      bet, mult: 'Variable (cash out)', payout: null,
+      balance: isDemo ? _u.demoBalance : _u.balance, isDemo,
+    });
 
     const game = beginGame(message.author.id, TOTAL);
     spendBet(message.author.id, bet, isDemo);

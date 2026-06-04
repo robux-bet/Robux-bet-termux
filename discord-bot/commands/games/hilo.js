@@ -33,7 +33,11 @@ module.exports = {
     if (client.activeGames.has(gameKey)) return message.reply({ embeds: [errorEmbed('Game Active', 'Finish your current HiLo!')] });
 
     const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
-    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Hi-Lo');
+    const _u = getUser(message.author.id);
+    const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Hi-Lo', null, null, {
+      bet, mult: '1.25x → 3x (8 streaks)', payout: null,
+      balance: isDemo ? _u.demoBalance : _u.balance, isDemo,
+    });
 
     const game = beginGame(message.author.id, 22);
     spendBet(message.author.id, bet, isDemo);

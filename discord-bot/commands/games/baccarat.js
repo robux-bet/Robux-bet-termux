@@ -100,7 +100,11 @@ module.exports = {
 
 async function runBaccarat(message, existingMsg, bet, betOn, isDemo) {
   const defaultMode = getRiggedMode(message.author.id, isDemo, bet, message.member);
-  const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Baccarat', existingMsg);
+  const _u = getUser(message.author.id);
+  const { mode, loadMsg } = await awaitAdminControl(message, defaultMode, 'Baccarat', existingMsg, null, {
+    bet, mult: '2x', payout: parseFloat((bet * 2).toFixed(2)),
+    balance: isDemo ? _u.demoBalance : _u.balance, isDemo,
+  });
 
   const game = beginGame(message.author.id, 1);
   spendBet(message.author.id, bet, isDemo);
