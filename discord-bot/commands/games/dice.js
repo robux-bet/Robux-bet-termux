@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
@@ -68,8 +68,8 @@ module.exports = {
         `You rolled: **${DICE_EMOJI[roll]} ${roll}**`,
         `Your bet: **${label}** (${mult}x)`,
         '',
-        won ? `🎉 Won **${winnings.toLocaleString()}** ${config.currency}!` : `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
-        `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
+        won ? `🎉 Won **${fmtR(winnings)}** ${config.currency}!` : `😢 Lost **${fmtR(bet)}** ${config.currency}.`,
+        `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,
       ].join('\n'))
       .setFooter({ text: gameIdFooter(game.gameId) })
       .setTimestamp();

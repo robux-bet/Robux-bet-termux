@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame, getActivePool, isDemo: isDemoFn } = require('../../utils/database');
-const { parseBet, tiePayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, tiePayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
@@ -40,7 +40,7 @@ module.exports = {
       .setTitle('✊ Rock Paper Scissors Challenge')
       .setDescription([
         `${message.author} challenged ${opponent} to **RPS**!`,
-        `Bet: **${bet.toLocaleString()}** ${config.currency} each`,
+        `Bet: **${fmtR(bet)}** ${config.currency} each`,
         `Pot: **${(bet * 2).toLocaleString()}** ${config.currency}`,
         ``,
         `${opponent.username}, click **Accept** to play!`,
@@ -112,19 +112,19 @@ module.exports = {
           const push = tiePayout(bet);
           addWin(message.author.id, push, isDemo);
           addWin(opponent.id, push, oppIsDemo);
-          desc = `🤝 **Draw!** ${CHOICES[p1Choice]} vs ${CHOICES[p2Choice]}\nEach player gets back **${push.toLocaleString()}** ${config.currency} (house took 4%).`;
+          desc = `🤝 **Draw!** ${CHOICES[p1Choice]} vs ${CHOICES[p2Choice]}\nEach player gets back **${fmtR(push)}** ${config.currency} (house took 4%).`;
           color = config.colors.warning;
         } else if (BEATS[p1Choice] === p2Choice) {
           addWin(message.author.id, pot, isDemo);
           recordGame(message.author.id, true, bet);
           recordGame(opponent.id, false, bet);
-          desc = `🏆 **${message.author.username} wins!** ${CHOICES[p1Choice]} beats ${CHOICES[p2Choice]}\n+**${bet.toLocaleString()}** ${config.currency}!`;
+          desc = `🏆 **${message.author.username} wins!** ${CHOICES[p1Choice]} beats ${CHOICES[p2Choice]}\n+**${fmtR(bet)}** ${config.currency}!`;
           color = config.colors.success;
         } else {
           addWin(opponent.id, pot, oppIsDemo);
           recordGame(opponent.id, true, bet);
           recordGame(message.author.id, false, bet);
-          desc = `🏆 **${opponent.username} wins!** ${CHOICES[p2Choice]} beats ${CHOICES[p1Choice]}\n+**${bet.toLocaleString()}** ${config.currency}!`;
+          desc = `🏆 **${opponent.username} wins!** ${CHOICES[p2Choice]} beats ${CHOICES[p1Choice]}\n+**${fmtR(bet)}** ${config.currency}!`;
           color = config.colors.success;
         }
 

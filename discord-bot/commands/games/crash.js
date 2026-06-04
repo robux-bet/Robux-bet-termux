@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, deriveCrashPoint, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
@@ -49,7 +49,7 @@ module.exports = {
         `**${current.toFixed(2)}x**`,
         '',
         crashed ? `💥 Crashed at **${crashPoint.toFixed(2)}x**` : '⏳ Click Cash Out before it crashes!',
-        `Bet: **${bet.toLocaleString()}** ${config.currency}`,
+        `Bet: **${fmtR(bet)}** ${config.currency}`,
       ].join('\n'))
       .setTimestamp();
 
@@ -91,7 +91,7 @@ module.exports = {
 
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         const embed = buildEmbed(true);
-        embed.setDescription(embed.data.description + `\n😢 Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)
+        embed.setDescription(embed.data.description + `\n😢 Lost **${fmtR(bet)}** ${config.currency}.\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`)
           .setFooter({ text: gameIdFooter(game.gameId) });
         loadMsg.edit({ embeds: [embed], components: [] }).catch(() => {});
         return;
@@ -122,8 +122,8 @@ module.exports = {
           .setTitle(`💰 Cashed Out!${balLabel(isDemo)}`)
           .setDescription([
             `Cashed out at **${cashedOutAt.toFixed(2)}x**`,
-            `Won **${winnings.toLocaleString()}** ${config.currency}!`,
-            `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
+            `Won **${fmtR(winnings)}** ${config.currency}!`,
+            `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,
           ].join('\n'))
           .setFooter({ text: gameIdFooter(game.gameId) })
           .setTimestamp();

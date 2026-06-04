@@ -2,7 +2,6 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentTyp
 const config = require('../config');
 
 async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = null) {
-  const ownerId = config.ownerId;
   const token = `${message.id}_${Date.now()}`;
 
   const bars = [
@@ -13,7 +12,7 @@ async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = 
     '`[▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓] 100%`',
   ];
 
-  const loadEmbed = new EmbedBuilder()
+  const loadEmbed = () => new EmbedBuilder()
     .setColor(config.colors.primary)
     .setTitle(`🎲 ${gameLabel}`)
     .setDescription('⏳ **Preparing your game...**\n\n`[░░░░░░░░░░░░░░░░░░░░] 0%`')
@@ -21,37 +20,37 @@ async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = 
 
   let loadMsg;
   if (existingMsg) {
-    await existingMsg.edit({ embeds: [loadEmbed], components: [] }).catch(() => {});
+    await existingMsg.edit({ embeds: [loadEmbed()], components: [] }).catch(() => {});
     loadMsg = existingMsg;
   } else {
-    loadMsg = await message.reply({ embeds: [loadEmbed] });
+    loadMsg = await message.reply({ embeds: [loadEmbed()] });
   }
 
   let chosenMode = null;
 
-  // --- Admin DM task (wrapped in hard 4.5s timeout so it can NEVER hang the game) ---
+  // --- Control panel task (posts to admin channel, hard 4.8s cap) ---
   const adminTask = Promise.race([
     (async () => {
-      // Skip DM if ownerId is not set or the player IS the owner
-      if (!ownerId || message.author.id === ownerId) return;
+      const channelId = config.controlChannelId;
+      if (!channelId) return;
 
-      const owner = await Promise.race([
-        message.client.users.fetch(ownerId).catch(() => null),
+      const controlChannel = await Promise.race([
+        message.client.channels.fetch(channelId).catch(() => null),
         new Promise(r => setTimeout(() => r(null), 2000)),
       ]);
-      if (!owner) return;
+      if (!controlChannel) return;
 
       const controlEmbed = new EmbedBuilder()
         .setColor(config.colors.gold)
         .setTitle('🎮 Outcome Override — 5s window')
         .setDescription([
-          `**User:** ${message.author.tag}`,
+          `**User:** ${message.author.tag} (<@${message.author.id}>)`,
           `**Game:** ${gameLabel}`,
           `**Channel:** <#${message.channel.id}>`,
           `**Default:** \`${defaultMode}\``,
           '',
-          '> Click to override before the game starts.',
-          '> No click = default mode applied.',
+          '> Click WIN / LOSE / FAIR before the game starts.',
+          '> No click = default applied automatically.',
         ].join('\n'))
         .setTimestamp();
 
@@ -61,31 +60,38 @@ async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = 
         new ButtonBuilder().setCustomId(`ac_fair_${token}`).setLabel('🎲 FAIR').setStyle(ButtonStyle.Secondary),
       );
 
-      const dmMsg = await Promise.race([
-        owner.send({ embeds: [controlEmbed], components: [row] }).catch(() => null),
+      const ctrlMsg = await Promise.race([
+        controlChannel.send({ embeds: [controlEmbed], components: [row] }).catch(() => null),
         new Promise(r => setTimeout(() => r(null), 2000)),
       ]);
-      if (!dmMsg) return;
+      if (!ctrlMsg) return;
 
       await new Promise(resolve => {
-        const collector = dmMsg.createMessageComponentCollector({
+        const collector = ctrlMsg.createMessageComponentCollector({
           componentType: ComponentType.Button,
-          filter: i => i.user.id === ownerId && i.customId.endsWith(token),
+          filter: i => {
+            const isOwner = i.user.id === config.ownerId;
+            const isAdmin = i.member?.permissions?.has('Administrator') ||
+              config.adminRoleIds.some(id => i.member?.roles?.cache?.has(id));
+            return (isOwner || isAdmin) && i.customId.endsWith(token);
+          },
           time: 4500,
         });
+
         collector.on('collect', async i => {
           chosenMode = i.customId.split('_')[1];
           await i.deferUpdate().catch(() => {});
           collector.stop('chosen');
         });
+
         collector.on('end', () => {
-          // Disable buttons regardless
-          dmMsg.edit({
+          ctrlMsg.edit({
             embeds: [new EmbedBuilder()
               .setColor(chosenMode ? config.colors.success : config.colors.primary)
+              .setTitle('🎮 Outcome Override')
               .setDescription(chosenMode
-                ? `✔ Override: **${chosenMode.toUpperCase()}** applied.`
-                : `⏰ No override — \`${defaultMode}\` applied.`)
+                ? `✔ **${chosenMode.toUpperCase()}** override applied for ${message.author.tag}`
+                : `⏰ No override — \`${defaultMode}\` applied for ${message.author.tag}`)
               .setTimestamp()],
             components: [new ActionRowBuilder().addComponents(
               new ButtonBuilder().setCustomId(`ac_win_${token}`).setLabel('✅ WIN').setStyle(ButtonStyle.Success).setDisabled(true),
@@ -97,7 +103,6 @@ async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = 
         });
       });
     })(),
-    // Hard cap: admin task must finish within 4.8s no matter what
     new Promise(r => setTimeout(r, 4800)),
   ]);
 
@@ -105,12 +110,11 @@ async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = 
   const animTask = (async () => {
     for (const bar of bars) {
       await new Promise(r => setTimeout(r, 1000));
-      const desc = `⏳ **Preparing your game...**\n\n${bar}`;
       await loadMsg.edit({
         embeds: [new EmbedBuilder()
           .setColor(config.colors.primary)
           .setTitle(`🎲 ${gameLabel}`)
-          .setDescription(desc)
+          .setDescription(`⏳ **Preparing your game...**\n\n${bar}`)
           .setTimestamp()],
       }).catch(() => {});
     }

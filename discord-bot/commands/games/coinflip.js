@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
@@ -27,7 +27,7 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setColor(config.colors.primary)
         .setTitle(`🪙 Coinflip${balLabel(isDemo)}`)
-        .setDescription(`Bet: **${bet.toLocaleString()}** ${config.currency}\nChoose **Heads** or **Tails**!`)
+        .setDescription(`Bet: **${fmtR(bet)}** ${config.currency}\nChoose **Heads** or **Tails**!`)
         .setTimestamp();
       const reply = await message.reply({ embeds: [embed], components: [row] });
 
@@ -78,16 +78,16 @@ async function runFlip(message, existingMsg, bet, choice, isDemo) {
     const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
     embed.setColor(config.colors.success).setDescription([
       `It's **${resultLabel}**! Your pick: **${choiceLabel}**`,
-      `🎉 Won **${payout.toLocaleString()}** ${config.currency}!`,
-      `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
+      `🎉 Won **${fmtR(payout)}** ${config.currency}!`,
+      `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,
     ].join('\n')).setFooter({ text: gameIdFooter(game.gameId) });
   } else {
     recordGame(message.author.id, false, bet);
     const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
     embed.setColor(config.colors.error).setDescription([
       `It's **${resultLabel}**! Your pick: **${choiceLabel}**`,
-      `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
-      `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
+      `😢 Lost **${fmtR(bet)}** ${config.currency}.`,
+      `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,
     ].join('\n')).setFooter({ text: gameIdFooter(game.gameId) });
   }
 

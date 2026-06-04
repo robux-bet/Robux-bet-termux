@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
 const config = require('../../config');
@@ -113,7 +113,7 @@ module.exports = {
           addWin(p2.userId, calcPayout(bet * 2, 1, false), oppIsDemo);
           recordGame(p2.userId, true, bet);
         }
-        desc = `💀 **${p2.name} wins!** Lost **${bet.toLocaleString()}** ${config.currency}.`;
+        desc = `💀 **${p2.name} wins!** Lost **${fmtR(bet)}** ${config.currency}.`;
         color = config.colors.error;
       }
       const newBal = isDemo ? getUser(p1.userId).demoBalance : getUser(p1.userId).balance;
@@ -122,7 +122,7 @@ module.exports = {
           { name: `❤️ ${p1.name}`, value: hpBar(p1.hp, p1.maxHp), inline: false },
           { name: `💜 ${p2.name}`, value: hpBar(p2.hp, p2.maxHp), inline: false },
         )
-        .setDescription(`${desc}\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)
+        .setDescription(`${desc}\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`)
         .setTimestamp();
       reply.edit({ embeds: [embed], components: [] }).catch(() => {});
     }

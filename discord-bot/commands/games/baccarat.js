@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, tiePayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, tiePayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
@@ -40,7 +40,7 @@ module.exports = {
         new ButtonBuilder().setCustomId('bac_t').setLabel('🤝 Tie (8x)').setStyle(ButtonStyle.Success),
       );
       const embed = new EmbedBuilder().setColor(config.colors.primary)
-        .setTitle(`🃏 Baccarat${balLabel(isDemo)}`).setDescription(`Bet: **${bet.toLocaleString()}** ${config.currency}\nChoose your bet:`).setTimestamp();
+        .setTitle(`🃏 Baccarat${balLabel(isDemo)}`).setDescription(`Bet: **${fmtR(bet)}** ${config.currency}\nChoose your bet:`).setTimestamp();
       const reply = await message.reply({ embeds: [embed], components: [row] });
       const collector = reply.createMessageComponentCollector({
         componentType: ComponentType.Button, filter: i => i.user.id === message.author.id, time: 30000, max: 1,
@@ -129,10 +129,10 @@ async function runBaccarat(message, existingMsg, bet, betOn, isDemo) {
     )
     .setDescription([
       `**Winner: ${betLabels[trueResult]}** | Your bet: **${betLabels[betOn]}**`,
-      won ? `🎉 Won **${winnings.toLocaleString()}** ${config.currency}!` :
-        trueResult === 't' && betOn !== 't' ? `🤝 Tie push — got back **${winnings.toLocaleString()}** ${config.currency}.` :
-        `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
-      `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
+      won ? `🎉 Won **${fmtR(winnings)}** ${config.currency}!` :
+        trueResult === 't' && betOn !== 't' ? `🤝 Tie push — got back **${fmtR(winnings)}** ${config.currency}.` :
+        `😢 Lost **${fmtR(bet)}** ${config.currency}.`,
+      `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,
     ].join('\n'))
     .setFooter({ text: gameIdFooter(game.gameId) })
     .setTimestamp();

@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame, getActivePool } = require('../../utils/database');
-const { parseBet, tiePayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, tiePayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const config = require('../../config');
 
@@ -67,7 +67,7 @@ module.exports = {
       .setTitle('❌⭕ TTT Challenge')
       .setDescription([
         `${message.author} challenged ${opponent} to **Tic Tac Toe**!`,
-        `Bet: **${bet.toLocaleString()}** ${config.currency} each`,
+        `Bet: **${fmtR(bet)}** ${config.currency} each`,
         `${opponent.username}, click **Accept**!`,
       ].join('\n'))
       .setTimestamp();
@@ -119,24 +119,24 @@ module.exports = {
           const push = tiePayout(bet);
           addWin(message.author.id, push, isDemo);
           addWin(opponent.id, push, oppIsDemo);
-          desc = `🤝 **Draw!** Each player gets back **${push.toLocaleString()}** ${config.currency} (house took 4%).`;
+          desc = `🤝 **Draw!** Each player gets back **${fmtR(push)}** ${config.currency} (house took 4%).`;
           color = config.colors.warning;
         } else if (winner === 'X') {
           addWin(message.author.id, pot, isDemo);
           recordGame(message.author.id, true, bet);
           recordGame(opponent.id, false, bet);
-          desc = `🏆 **${message.author.username} wins!** +**${bet.toLocaleString()}** ${config.currency}!`;
+          desc = `🏆 **${message.author.username} wins!** +**${fmtR(bet)}** ${config.currency}!`;
           color = config.colors.success;
         } else {
           addWin(opponent.id, pot, oppIsDemo);
           recordGame(opponent.id, true, bet);
           recordGame(message.author.id, false, bet);
-          desc = `🏆 **${opponent.username} wins!** +**${bet.toLocaleString()}** ${config.currency}!`;
+          desc = `🏆 **${opponent.username} wins!** +**${fmtR(bet)}** ${config.currency}!`;
           color = config.colors.success;
         }
         const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
         const embed = new EmbedBuilder().setColor(color).setTitle('❌⭕ TTT Result')
-          .setDescription([desc, `💰 ${message.author.username}'s balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`].join('\n')).setTimestamp();
+          .setDescription([desc, `💰 ${message.author.username}'s balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`].join('\n')).setTimestamp();
         await challengeMsg.edit({ embeds: [embed], components: buildRows(board, true) }).catch(() => {});
       }
 

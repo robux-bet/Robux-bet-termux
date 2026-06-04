@@ -82,7 +82,7 @@ module.exports = {
           ``,
           `\`\`\``,
           MARKET_ITEMS.map(i =>
-            `${i.emoji} ${i.name.padEnd(18)} ${RARITY_COLORS[i.rarity]} ${i.rarity.padEnd(10)} ${i.price.toLocaleString()} Robux`
+            `${i.emoji} ${i.name.padEnd(18)} ${RARITY_COLORS[i.rarity]} ${i.rarity.padEnd(10)} ${i.fmtR(price)} Robux`
           ).join('\n'),
           `\`\`\``,
           `Use \`.market info <id>\` to view item perks`,
@@ -101,7 +101,7 @@ module.exports = {
         .setColor(config.colors.gold)
         .setTitle(`${item.emoji} ${item.name}`)
         .setDescription([
-          `${RARITY_COLORS[item.rarity]} **${item.rarity}** · **${item.price.toLocaleString()}** ${config.currency}`,
+          `${RARITY_COLORS[item.rarity]} **${item.rarity}** · **${item.fmtR(price)}** ${config.currency}`,
           '',
           item.desc,
           '',
@@ -137,8 +137,8 @@ module.exports = {
       const user = getUser(message.author.id);
       if (user.balance < item.price) {
         return message.reply({ embeds: [errorEmbed('Insufficient Actual Balance', [
-          `You need **${item.price.toLocaleString()}** ${config.currency} (actual balance).`,
-          `You have: **${user.balance.toLocaleString()}**`,
+          `You need **${item.fmtR(price)}** ${config.currency} (actual balance).`,
+          `You have: **${user.fmtR(balance)}**`,
         ].join('\n'))] });
       }
 
@@ -162,7 +162,7 @@ module.exports = {
             .setDescription([
               `You opened the **Mystery Box** and found **${reward}** ${config.currency}!`,
               `Net ${reward > item.price ? `+${reward - item.price}` : `${reward - item.price}`} ${config.currency}`,
-              `💰 Balance: **${user.balance.toLocaleString()}** ${config.currency}`,
+              `💰 Balance: **${user.fmtR(balance)}** ${config.currency}`,
             ].join('\n'))
             .setFooter({ text: gameIdFooter(game.gameId) })
             .setTimestamp()],
@@ -177,12 +177,12 @@ module.exports = {
       return message.reply({
         embeds: [new EmbedBuilder().setColor(config.colors.success).setTitle('✅ Purchase Complete!')
           .setDescription([
-            `You bought ${item.emoji} **${item.name}** for **${item.price.toLocaleString()}** ${config.currency}!`,
+            `You bought ${item.emoji} **${item.name}** for **${item.fmtR(price)}** ${config.currency}!`,
             '',
             '**Your Perks:**',
             item.perks.map(p => `• ${p}`).join('\n'),
             '',
-            `💰 Remaining balance: **${user.balance.toLocaleString()}** ${config.currency}`,
+            `💰 Remaining balance: **${user.fmtR(balance)}** ${config.currency}`,
           ].join('\n')).setTimestamp()],
       });
     }
@@ -203,7 +203,7 @@ module.exports = {
       saveUser(message.author.id, user);
 
       return message.reply({
-        embeds: [successEmbed('Item Sold', `Sold ${item.emoji} **${item.name}** for **${sellPrice.toLocaleString()}** ${config.currency} (50% resale).\n💰 Balance: **${user.balance.toLocaleString()}** ${config.currency}`)],
+        embeds: [successEmbed('Item Sold', `Sold ${item.emoji} **${item.name}** for **${fmtR(sellPrice)}** ${config.currency} (50% resale).\n💰 Balance: **${user.fmtR(balance)}** ${config.currency}`)],
       });
     }
 

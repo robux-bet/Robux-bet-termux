@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
@@ -43,7 +43,7 @@ module.exports = {
         new ButtonBuilder().setCustomId('card_clubs').setLabel('♣️ Clubs (4x)').setStyle(ButtonStyle.Secondary),
       );
       const embed = new EmbedBuilder().setColor(config.colors.primary)
-        .setTitle(`🃏 Card Guess${balLabel(isDemo)}`).setDescription(`Bet: **${bet.toLocaleString()}** ${config.currency}\nGuess the card's color or suit!`).setTimestamp();
+        .setTitle(`🃏 Card Guess${balLabel(isDemo)}`).setDescription(`Bet: **${fmtR(bet)}** ${config.currency}\nGuess the card's color or suit!`).setTimestamp();
       const reply = await message.reply({ embeds: [embed], components: [row1, row2] });
       const collector = reply.createMessageComponentCollector({
         componentType: ComponentType.Button, filter: i => i.user.id === message.author.id, time: 30000, max: 1,
@@ -105,8 +105,8 @@ async function resolve(message, existingMsg, bet, choice, isDemo) {
       `The card was: **${card.rank}${card.suit}** (${isRed ? '🔴 Red' : '⚫ Black'})`,
       `Your guess: **${BETS[choice].label}** (${mult}x)`,
       '',
-      won ? `🎉 Won **${winnings.toLocaleString()}** ${config.currency}!` : `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
-      `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
+      won ? `🎉 Won **${fmtR(winnings)}** ${config.currency}!` : `😢 Lost **${fmtR(bet)}** ${config.currency}.`,
+      `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,
     ].join('\n'))
     .setFooter({ text: gameIdFooter(game.gameId) })
     .setTimestamp();

@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, deriveMineBoardFromFloats, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
@@ -80,7 +80,7 @@ module.exports = {
       .setColor(config.colors.primary)
       .setTitle(`💣 Mines${balLabel(isDemo)}`)
       .setDescription([
-        `Bet: **${bet.toLocaleString()}** ${config.currency} | Mines: **${mineCount}** | Gems found: **${revealed}**`,
+        `Bet: **${fmtR(bet)}** ${config.currency} | Mines: **${mineCount}** | Gems found: **${revealed}**`,
         status,
       ].filter(Boolean).join('\n'))
       .setTimestamp();
@@ -112,7 +112,7 @@ module.exports = {
         });
 
         await i.update({
-          embeds: [buildEmbed(`💰 Cashed out at **${mult}x**! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
+          embeds: [buildEmbed(`💰 Cashed out at **${mult}x**! Won **${fmtR(winnings)}** ${config.currency}!\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
           components: buildRows(true),
         }).catch(() => {});
         return;
@@ -137,7 +137,7 @@ module.exports = {
         });
 
         await i.update({
-          embeds: [buildEmbed(`💥 Hit a mine! Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
+          embeds: [buildEmbed(`💥 Hit a mine! Lost **${fmtR(bet)}** ${config.currency}.\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
           components: buildRows(true),
         }).catch(() => {});
       } else {
@@ -162,7 +162,7 @@ module.exports = {
           });
 
           await i.update({
-            embeds: [buildEmbed(`🎉 All gems found! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
+            embeds: [buildEmbed(`🎉 All gems found! Won **${fmtR(winnings)}** ${config.currency}!\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
             components: buildRows(true),
           }).catch(() => {});
         } else {

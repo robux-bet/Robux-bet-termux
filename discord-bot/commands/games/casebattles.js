@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame, getActivePool } = require('../../utils/database');
-const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, deriveWeightedItem, gameIdFooter } = require('../../utils/fairness');
 const config = require('../../config');
@@ -48,7 +48,7 @@ module.exports = {
       .setTitle('📦 Case Battle Challenge')
       .setDescription([
         `${message.author} challenged ${opponent} to a Case Battle!`,
-        `Bet: **${bet.toLocaleString()}** ${config.currency} each | Pot: **${(bet * 2).toLocaleString()}** ${config.currency}`,
+        `Bet: **${fmtR(bet)}** ${config.currency} each | Pot: **${(bet * 2).toLocaleString()}** ${config.currency}`,
         `${opponent.username}, click **Accept**!`,
       ].join('\n'))
       .setTimestamp();
@@ -124,8 +124,8 @@ async function runBattle(msg, bet, p1User, p2User, p1IsDemo, p2IsDemo) {
     .setDescription([
       p1Won
         ? `🏆 **${p1User.username} wins!** +**${(payout - bet).toLocaleString()}** ${config.currency}!`
-        : `💔 **${p2User.username} wins!** ${p1User.username} lost **${bet.toLocaleString()}** ${config.currency}.`,
-      `💰 ${p1User.username}'s balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(p1IsDemo)}`,
+        : `💔 **${p2User.username} wins!** ${p1User.username} lost **${fmtR(bet)}** ${config.currency}.`,
+      `💰 ${p1User.username}'s balance: **${fmtR(newBal)}** ${config.currency}${balLabel(p1IsDemo)}`,
     ].join('\n'))
     .setFooter({ text: gameIdFooter(game.gameId) })
     .setTimestamp();

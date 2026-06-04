@@ -44,7 +44,7 @@ function parseBet(userId, arg) {
 function calcPayout(bet, mult, applyFloor = false) {
   let m = applyFloor ? Math.floor(mult) : mult;
   if (applyFloor && m <= 1) return bet;
-  return Math.floor(bet * m);
+  return parseFloat((bet * m).toFixed(2));
 }
 
 /**
@@ -52,6 +52,13 @@ function calcPayout(bet, mult, applyFloor = false) {
  */
 function tiePayout(bet) {
   return bet;
+}
+
+/**
+ * Format a Robux amount to 2 decimal places.
+ */
+function fmtR(n) {
+  return (+n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /**
@@ -68,4 +75,4 @@ function balLabel(isDemo) {
   return isDemo ? ' *(Demo)*' : '';
 }
 
-module.exports = { parseBet, calcPayout, tiePayout, rigged50Win, balLabel };
+module.exports = { parseBet, calcPayout, tiePayout, rigged50Win, balLabel, fmtR };

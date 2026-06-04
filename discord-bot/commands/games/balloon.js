@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
@@ -84,7 +84,7 @@ module.exports = {
         });
 
         await i.update({
-          embeds: [buildEmbed(`💰 Cashed at **${mult}x**! Won **${winnings.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
+          embeds: [buildEmbed(`💰 Cashed at **${mult}x**! Won **${fmtR(winnings)}** ${config.currency}!\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`).setFooter({ text: gameIdFooter(game.gameId) })],
           components: [],
         }).catch(() => {});
         return;
@@ -109,8 +109,8 @@ module.exports = {
         await i.update({
           embeds: [new EmbedBuilder().setColor(config.colors.error).setTitle('💥 POP!').setDescription([
             `The balloon popped after **${pumps}** pumps!`,
-            `Lost **${bet.toLocaleString()}** ${config.currency}.`,
-            `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
+            `Lost **${fmtR(bet)}** ${config.currency}.`,
+            `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,
           ].join('\n')).setFooter({ text: gameIdFooter(game.gameId) }).setTimestamp()],
           components: [],
         }).catch(() => {});

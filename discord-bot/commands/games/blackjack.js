@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { spendBet, addWin, getUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, tiePayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, tiePayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, shuffleDeckFromFloats, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
@@ -102,9 +102,9 @@ module.exports = {
         outcome: { playerHand: handStr(player), dealerHand: handStr(dealer), result: naturalResult },
       });
       const newBal = isDemo ? getUser(message.author.id).demoBalance : getUser(message.author.id).balance;
-      if (naturalResult === 'lose') return loadMsg.edit({ embeds: [buildEmbed(true, 'lose').setDescription(`😢 Lost **${bet.toLocaleString()}** ${config.currency}.\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)] });
-      if (naturalResult === 'push') return loadMsg.edit({ embeds: [buildEmbed(true, 'push').setDescription(`Both got Blackjack! Push — got back **${naturalWin.toLocaleString()}** ${config.currency}.`)] });
-      return loadMsg.edit({ embeds: [buildEmbed(true, 'win').setDescription(`🎉 **Blackjack!** Won **${naturalWin.toLocaleString()}** ${config.currency}!\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`)] });
+      if (naturalResult === 'lose') return loadMsg.edit({ embeds: [buildEmbed(true, 'lose').setDescription(`😢 Lost **${fmtR(bet)}** ${config.currency}.\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`)] });
+      if (naturalResult === 'push') return loadMsg.edit({ embeds: [buildEmbed(true, 'push').setDescription(`Both got Blackjack! Push — got back **${fmtR(naturalWin)}** ${config.currency}.`)] });
+      return loadMsg.edit({ embeds: [buildEmbed(true, 'win').setDescription(`🎉 **Blackjack!** Won **${fmtR(naturalWin)}** ${config.currency}!\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`)] });
     }
 
     await loadMsg.edit({ embeds: [buildEmbed()], components: [row()] });
@@ -149,10 +149,10 @@ module.exports = {
       });
 
       const embed = buildEmbed(true, result);
-      const desc = result === 'win' ? `🎉 Won **${winnings.toLocaleString()}** ${config.currency}!` :
-        result === 'push' ? `🤝 Push — got back **${winnings.toLocaleString()}** ${config.currency}.` :
-        `😢 Lost **${effectiveBet.toLocaleString()}** ${config.currency}.`;
-      embed.setDescription(`${desc}\n💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`);
+      const desc = result === 'win' ? `🎉 Won **${fmtR(winnings)}** ${config.currency}!` :
+        result === 'push' ? `🤝 Push — got back **${fmtR(winnings)}** ${config.currency}.` :
+        `😢 Lost **${fmtR(effectiveBet)}** ${config.currency}.`;
+      embed.setDescription(`${desc}\n💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`);
       loadMsg.edit({ embeds: [embed], components: [] }).catch(() => {});
     }
 

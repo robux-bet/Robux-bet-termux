@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { spendBet, addWin, getUser, saveUser, recordGame } = require('../../utils/database');
-const { parseBet, calcPayout, balLabel } = require('../../utils/gameUtils');
+const { parseBet, calcPayout, balLabel, fmtR } = require('../../utils/gameUtils');
 const { errorEmbed } = require('../../utils/embeds');
 const { beginGame, saveGameRecord, gameIdFooter } = require('../../utils/fairness');
 const { getRiggedMode, isForceWin, recordRiggedGame } = require('../../utils/outcome');
@@ -128,8 +128,8 @@ module.exports = {
         `${getColor(result)} **${result}** — ${result === 0 ? 'Green' : RED.includes(result) ? 'Red' : 'Black'}`,
         `Your bet: **${betTarget}** (${mult}x)`,
         '',
-        won ? `🎉 Won **${winnings.toLocaleString()}** ${config.currency}!` : `😢 Lost **${bet.toLocaleString()}** ${config.currency}.`,
-        `💰 Balance: **${newBal.toLocaleString()}** ${config.currency}${balLabel(isDemo)}`,
+        won ? `🎉 Won **${fmtR(winnings)}** ${config.currency}!` : `😢 Lost **${fmtR(bet)}** ${config.currency}.`,
+        `💰 Balance: **${fmtR(newBal)}** ${config.currency}${balLabel(isDemo)}`,
         '',
         `*Payouts: Color/Even/Odd/High/Low = 2x · Number = 35x · Green = 14x*`,
       ].join('\n'))
