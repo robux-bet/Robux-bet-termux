@@ -1,20 +1,16 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getAllUsers } = require('../../utils/database');
 const config = require('../../config');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('broadcast')
-    .setDescription('DM an announcement to all users (admin only)')
-    .addStringOption(o => o.setName('message').setDescription('Message to broadcast').setRequired(true)),
+    .setDescription('Send an announcement to a channel (admin only)')
+    .addStringOption(o => o.setName('message').setDescription('Announcement message').setRequired(true))
+    .addChannelOption(o => o.setName('channel').setDescription('Channel to send to (defaults to current channel)').setRequired(false)),
 
   async execute(interaction, client) {
-    const text = interaction.options.getString('message');
-    await interaction.deferReply({ ephemeral: true });
-
-    const users   = getAllUsers();
-    const userIds = Object.keys(users);
-    let sent = 0, failed = 0;
+    const text    = interaction.options.getString('message');
+    const target  = interaction.options.getChannel('channel') || interaction.channel;
 
     const embed = new EmbedBuilder()
       .setColor(config.colors.primary)
@@ -23,21 +19,25 @@ module.exports = {
       .setFooter({ text: `discord.gg/${config.serverInvite}` })
       .setTimestamp();
 
-    for (const uid of userIds) {
-      try {
-        const u = await client.users.fetch(uid).catch(() => null);
-        if (!u || u.bot) { failed++; continue; }
-        await u.send({ embeds: [embed] });
-        sent++;
-      } catch { failed++; }
+    try {
+      await target.send({ embeds: [embed] });
+      await interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(config.colors.success)
+          .setTitle('✅ Broadcast Sent')
+          .setDescription(`Announcement posted in ${target}`)
+          .setTimestamp()],
+        ephemeral: true,
+      });
+    } catch (err) {
+      await interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(config.colors.error)
+          .setTitle('❌ Failed')
+          .setDescription(`Could not send to ${target}.\nMake sure the bot has permission to post there.`)
+          .setTimestamp()],
+        ephemeral: true,
+      });
     }
-
-    await interaction.editReply({
-      embeds: [new EmbedBuilder()
-        .setColor(config.colors.success)
-        .setTitle('📢 Broadcast Complete')
-        .setDescription(`**Sent:** ${sent} · **Failed:** ${failed}`)
-        .setTimestamp()],
-    });
   },
 };
