@@ -107,30 +107,50 @@ module.exports = {
         const pot = bet * 2;
         let desc, color, winnerId, winnerIsDemo;
 
+        let resultLabel;
         if (p1Choice === p2Choice) {
-          // Tie — house takes 4%
           const push = tiePayout(bet);
           addWin(message.author.id, push, isDemo);
           addWin(opponent.id, push, oppIsDemo);
           desc = `🤝 **Draw!** ${CHOICES[p1Choice]} vs ${CHOICES[p2Choice]}\nEach player gets back **${fmtR(push)}** ${config.currency} (house took 4%).`;
           color = config.colors.warning;
+          resultLabel = 'Draw';
         } else if (BEATS[p1Choice] === p2Choice) {
           addWin(message.author.id, pot, isDemo);
           recordGame(message.author.id, true, bet);
           recordGame(opponent.id, false, bet);
           desc = `🏆 **${message.author.username} wins!** ${CHOICES[p1Choice]} beats ${CHOICES[p2Choice]}\n+**${fmtR(bet)}** ${config.currency}!`;
           color = config.colors.success;
+          resultLabel = `${message.author.username} wins`;
         } else {
           addWin(opponent.id, pot, oppIsDemo);
           recordGame(opponent.id, true, bet);
           recordGame(message.author.id, false, bet);
           desc = `🏆 **${opponent.username} wins!** ${CHOICES[p2Choice]} beats ${CHOICES[p1Choice]}\n+**${fmtR(bet)}** ${config.currency}!`;
           color = config.colors.success;
+          resultLabel = `${opponent.username} wins`;
         }
 
         const embed = new EmbedBuilder().setColor(color).setTitle('✊ RPS Result')
           .setDescription(desc).setTimestamp();
         await challengeMsg.edit({ embeds: [embed], components: [] }).catch(() => {});
+
+        // Notify control channel with both picks
+        if (config.controlChannelId) {
+          const cc = await message.client.channels.fetch(config.controlChannelId).catch(() => null);
+          if (cc) cc.send({
+            embeds: [new EmbedBuilder()
+              .setColor(color)
+              .setTitle('✊ RPS Picks')
+              .setDescription([
+                `**${message.author.tag}:** ${CHOICES[p1Choice]}`,
+                `**${opponent.tag}:** ${CHOICES[p2Choice]}`,
+                `**Result:** ${resultLabel}`,
+                `Bet: **${fmtR(bet)}** ${config.currency} each`,
+              ].join('\n'))
+              .setTimestamp()],
+          }).catch(() => {});
+        }
       });
     });
 

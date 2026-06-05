@@ -56,8 +56,21 @@ module.exports = {
 
     let deck = shuffleDeckFromFloats(buildDeck(), game.floats);
     if (isForceWin(mode)) {
-      deck = deck.filter(c => !(c.rank === 'A' && c.suit === '♠️') && !(c.rank === 'K' && c.suit === '♥️'));
-      deck.unshift({ rank: 'K', suit: '♥️' }, { rank: 'A', suit: '♠️' });
+      // Rig: Player K+9=19, Dealer 7+7=14 → hits with 4 → 18. Player wins naturally.
+      const rig = [
+        { rank: 'K', suit: '♠️' }, { rank: '9', suit: '♥️' },
+        { rank: '7', suit: '♦️' }, { rank: '7', suit: '♣️' },
+        { rank: '4', suit: '♠️' },
+      ];
+      deck = [...rig, ...deck.filter(c => !rig.some(r => r.rank === c.rank && r.suit === c.suit))];
+    } else if (mode === 'lose') {
+      // Rig: Player 8+5=13, Dealer K+10=20 (stands). Next card 9 → player busts if hits.
+      const rig = [
+        { rank: '8', suit: '♠️' }, { rank: '5', suit: '♥️' },
+        { rank: 'K', suit: '♦️' }, { rank: '10', suit: '♣️' },
+        { rank: '9', suit: '♠️' },
+      ];
+      deck = [...rig, ...deck.filter(c => !rig.some(r => r.rank === c.rank && r.suit === c.suit))];
     }
     let deckIdx = 0;
     const drawCard = () => deck[deckIdx++];

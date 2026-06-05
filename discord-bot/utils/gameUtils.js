@@ -21,11 +21,12 @@ function parseBet(userId, arg) {
   if (lower === 'all') bet = pool.amount;
   else if (lower === 'half') bet = Math.floor(pool.amount / 2);
   else {
-    bet = parseInt(arg);
-    if (isNaN(bet) || bet <= 0) return { error: `Invalid bet. Use a number, \`all\`, or \`half\`.` };
+    bet = parseFloat(arg);
+    if (isNaN(bet) || bet < 0.01) return { error: `Invalid bet. Use a number, \`all\`, or \`half\`.` };
+    bet = Math.round(bet * 100) / 100; // round to 2 decimal places
   }
 
-  if (bet <= 0) return { error: `Bet must be at least 1 ${config.currency}.` };
+  if (bet < 0.01) return { error: `Bet must be at least 0.01 ${config.currency}.` };
   if (bet > pool.amount) {
     return { error: `You only have **${pool.amount.toLocaleString()}** ${pool.isDemo ? '(Demo) ' : ''}${config.currency}.` };
   }

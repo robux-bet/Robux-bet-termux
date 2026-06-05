@@ -29,15 +29,14 @@ module.exports = {
 
     const solo = [
       '🃏 baccarat', '🂡 bj', '🃏 cards',
-      '📈 crash', '🎲 dice', '🃏 hilo', '💣 mines', '🎡 roulette',
+      '📈 crash', '🎲 dice', '🎡 roulette',
     ];
     const pvp = ['📦 casebattles', '🪙 cf', '⚔️ fight', '✊ rps', '❌ ttt'];
 
     embed.addFields(
       { name: '🎮 Solo Games', value: solo.join(' · '), inline: false },
       { name: '👥 PvP Games (require @user)', value: pvp.join(' · '), inline: false },
-      { name: '⚙️ Interactive Admin Controls', value: 'Crash & Mines show extra buttons in the control channel to set crash point / safe tile limit.', inline: false },
-      { name: '⏳ Loading Screen', value: 'Every game shows a **5-second** loading screen. Bets support `all` and `half`.', inline: false },
+      { name: '⏳ Tip', value: 'Bets support `all` and `half`. Most games have interactive bet selection.', inline: false },
     );
 
     message.reply({ embeds: [embed] });

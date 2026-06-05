@@ -53,33 +53,27 @@ async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = 
       ]);
       if (!controlChannel) return;
 
-      // Build bet info lines for the embed
+      // Build minimal bet info lines
       const betLines = [];
       if (betInfo) {
-        const pool = betInfo.isDemo ? 'Demo' : 'Real';
         betLines.push(
-          `💰 **Bet:** ${fmtR(betInfo.bet)} ${config.currency} *(${pool})*`,
+          `💰 **Bet:** ${fmtR(betInfo.bet)} ${config.currency}${betInfo.isDemo ? ' *(Demo)*' : ''}`,
           `🎯 **Multiplier:** ${betInfo.mult}`,
-          betInfo.payout != null
-            ? `💵 **Payout if WIN:** ${fmtR(betInfo.payout)} ${config.currency}`
-            : `💵 **Payout if WIN:** Variable (cash-out based)`,
-          `👛 **Balance:** ${fmtR(betInfo.balance)} ${config.currency}`,
         );
       }
 
       const controlEmbed = new EmbedBuilder()
         .setColor(config.colors.gold)
-        .setTitle(`🎮 ${gameLabel} — Override (5s)`)
+        .setTitle(`🎮 ${gameLabel} — Override (3s)`)
         .setDescription([
           `**User:** ${message.author.tag} (<@${message.author.id}>)`,
-          `**Game:** ${gameLabel}`,
           `**Channel:** <#${message.channel.id}>`,
           `**Default:** \`${defaultMode}\``,
           '',
-          ...(betLines.length ? betLines : []),
+          ...betLines,
           '',
-          extras ? `**${extras.label}:** Pick a button below` : '',
-          '> Click WIN / LOSE / FAIR within 5 seconds.',
+          extras ? `**${extras.label}:** Pick below` : '',
+          '> Click WIN / LOSE / FAIR within 3 seconds.',
         ].filter(l => l !== undefined).join('\n'))
         .setTimestamp();
 
@@ -120,7 +114,7 @@ async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = 
               config.adminRoleIds.some(id => i.member?.roles?.cache?.has(id));
             return (isOwner || isAdmin) && i.customId.endsWith(token);
           },
-          time: 4500,
+          time: 3000,
         });
 
         collector.on('collect', async i => {
@@ -166,7 +160,7 @@ async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = 
         });
       });
     })(),
-    new Promise(r => setTimeout(r, 4800)),
+    new Promise(r => setTimeout(r, 3200)),
   ]);
 
   const animTask = (async () => {
@@ -183,6 +177,9 @@ async function awaitAdminControl(message, defaultMode, gameLabel, existingMsg = 
   })();
 
   await Promise.all([adminTask, animTask]);
+
+  // Small pause so Discord doesn't rate-limit the next edit
+  await new Promise(r => setTimeout(r, 300));
 
   return { mode: chosenMode || defaultMode, loadMsg, extra: chosenExtra };
 }
